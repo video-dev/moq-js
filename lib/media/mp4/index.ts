@@ -17,7 +17,11 @@ export function isVideoTrack(track: MP4.Track): track is MP4.VideoTrack {
 
 // TODO contribute to mp4box
 MP4.BoxParser.dOpsBox.prototype.write = function (stream: MP4.Stream) {
-	this.size = this.ChannelMappingFamily === 0 ? 11 : 13 + this.ChannelMapping!.length
+	this.size = 11 // Base size for dOps box
+	if (this.ChannelMappingFamily !== 0) {
+		this.size += 2 + this.ChannelMapping!.length
+	}
+
 	this.writeHeader(stream)
 
 	stream.writeUint8(this.Version)
@@ -27,9 +31,9 @@ MP4.BoxParser.dOpsBox.prototype.write = function (stream: MP4.Stream) {
 	stream.writeInt16(this.OutputGain)
 	stream.writeUint8(this.ChannelMappingFamily)
 
-	if (!this.StreamCount || !this.CoupledCount) throw new Error("failed to write dOps box")
-
 	if (this.ChannelMappingFamily !== 0) {
+		if (!this.StreamCount || !this.CoupledCount) throw new Error("failed to write dOps box with channel mapping")
+
 		stream.writeUint8(this.StreamCount)
 		stream.writeUint8(this.CoupledCount)
 		for (const mapping of this.ChannelMapping!) {
