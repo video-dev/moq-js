@@ -9,10 +9,12 @@ export class PublisherMoq extends HTMLElement {
 	private microphoneSelect!: HTMLSelectElement
 	private previewVideo!: HTMLVideoElement
 	private connectButton!: HTMLButtonElement
+	private playbackUrlTextarea!: HTMLTextAreaElement
 	private mediaStream: MediaStream | null = null
 
 	private publisher?: PublisherApi
 	private isPublishing = false
+	private namespace = ""
 
 	constructor() {
 		super()
@@ -30,13 +32,26 @@ export class PublisherMoq extends HTMLElement {
 		this.microphoneSelect = document.createElement("select")
 		this.previewVideo = document.createElement("video")
 		this.connectButton = document.createElement("button")
+		this.playbackUrlTextarea = document.createElement("textarea")
 
 		this.previewVideo.autoplay = true
 		this.previewVideo.playsInline = true
 		this.previewVideo.muted = true
 		this.connectButton.textContent = "Connect"
 
-		container.append(this.cameraSelect, this.microphoneSelect, this.previewVideo, this.connectButton)
+		this.playbackUrlTextarea.readOnly = true
+		this.playbackUrlTextarea.rows = 3
+		this.playbackUrlTextarea.style.display = "none"
+		this.playbackUrlTextarea.style.width = "100%"
+		this.playbackUrlTextarea.style.marginTop = "1rem"
+
+		container.append(
+			this.cameraSelect,
+			this.microphoneSelect,
+			this.previewVideo,
+			this.connectButton,
+			this.playbackUrlTextarea,
+		)
 		this.shadow.appendChild(container)
 
 		// Bindings
@@ -107,22 +122,27 @@ export class PublisherMoq extends HTMLElement {
 				return
 			}
 
-			const audioTrack = this.mediaStream!.getAudioTracks()[0];
-			const settings = audioTrack.getSettings();
+			this.namespace = this.getAttribute("namespace") ?? crypto.randomUUID()
 
-			const sampleRate    = settings.sampleRate    ?? (await new AudioContext()).sampleRate;
-			const numberOfChannels  = settings.channelCount  ?? 2;
+			const audioTrack = this.mediaStream.getAudioTracks()[0]
+			const settings = audioTrack.getSettings()
 
-			const videoConfig: VideoEncoderConfig = {codec: "avc1.42E01E", width: this.previewVideo.videoWidth, height: this.previewVideo.videoHeight, bitrate:1000000, framerate: 60};
-			const audioConfig: AudioEncoderConfig = {codec: "opus", sampleRate, numberOfChannels, bitrate:64000};
+			const sampleRate = settings.sampleRate ?? (await new AudioContext()).sampleRate
+			const numberOfChannels = settings.channelCount ?? 2
 
+			const videoConfig: VideoEncoderConfig = {
+				codec: "avc1.42E01E",
+				width: this.previewVideo.videoWidth,
+				height: this.previewVideo.videoHeight,
+				bitrate: 1000000,
+				framerate: 60,
+			}
+			const audioConfig: AudioEncoderConfig = { codec: "opus", sampleRate, numberOfChannels, bitrate: 64000 }
 
 			const opts: PublisherOptions = {
 				url: this.getAttribute("src")!,
-				fingerprintUrl: this.getAttribute("fingerprint")!,
-				namespace: [
-					this.getAttribute("namespace")! || crypto.randomUUID()
-				  ],
+				fingerprintUrl: this.getAttribute("fingerprint") ?? undefined,
+				namespace: [this.namespace],
 				media: this.mediaStream,
 				video: videoConfig,
 				audio: audioConfig,
@@ -138,6 +158,14 @@ export class PublisherMoq extends HTMLElement {
 				this.connectButton.textContent = "Stop"
 				this.cameraSelect.disabled = true
 				this.microphoneSelect.disabled = true
+
+				const playbackBaseUrl = this.getAttribute("playbackbaseurl")
+				if (playbackBaseUrl) {
+					this.playbackUrlTextarea.value = `${playbackBaseUrl}${this.namespace}`
+				} else {
+					this.playbackUrlTextarea.value = this.namespace
+				}
+				this.playbackUrlTextarea.style.display = "block"
 			} catch (err) {
 				console.error("Publish failed:", err)
 			}
@@ -151,6 +179,7 @@ export class PublisherMoq extends HTMLElement {
 				this.connectButton.textContent = "Connect"
 				this.cameraSelect.disabled = false
 				this.microphoneSelect.disabled = false
+				this.playbackUrlTextarea.style.display = "none"
 			}
 		}
 	}

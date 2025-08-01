@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Dynamic MoQ Player</title>
+		<script src="/moq-player/moq-player.iife.js"></script>
+		<script type="module" src="https://cdn.jsdelivr.net/npm/player.style/x-mas/+esm"></script>
+	</head>
+	<body>
+		<h1>Dynamic MoQ Player</h1>
+
+		<media-theme-x-mas id="player-container"> </media-theme-x-mas>
+
+		<script>
+			document.addEventListener("DOMContentLoaded", () => {
+				const urlParams = new URLSearchParams(window.location.search);
+				const namespace = urlParams.get("namespace");
+				const playerContainer = document.getElementById("player-container");
+
+				if (namespace && playerContainer) {
+					const player = document.createElement("video-moq");
+					player.id = "player";
+					player.slot = "media";
+					player.setAttribute(
+						"src",
+						`https://localrelay.cloudflare.mediaoverquic.com:4443/?namespace=${namespace}`,
+					);
+
+					playerContainer.appendChild(player);
+				} else {
+					const h1 = document.querySelector("h1");
+					if (h1) {
+						h1.textContent = "Error: 'namespace' URL parameter is missing.";
+					}
+				}
+			});
+		</script>
+	</body>
+</html>
