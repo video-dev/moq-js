@@ -21,6 +21,8 @@ export class Track {
 	constructor(media: MediaStreamTrack, config: BroadcastConfig) {
 		this.name = media.kind
 
+		console.log(`[Track] constructor for: ${this.name}`)
+
 		// We need to split based on type because Typescript is hard
 		if (isAudioTrack(media)) {
 			if (!config.audio) throw new Error("no audio config")
@@ -34,6 +36,8 @@ export class Track {
 	}
 
 	async #runAudio(track: MediaStreamAudioTrack, config: AudioEncoderConfig) {
+		console.log(`[Track] #runAudio for: ${this.name}`)
+
 		const source = new MediaStreamTrackProcessor({ track })
 		const encoder = new Audio.Encoder(config)
 		const container = new Container()
@@ -56,6 +60,8 @@ export class Track {
 	}
 
 	async #runVideo(track: MediaStreamVideoTrack, config: VideoEncoderConfig) {
+		console.log(`[Track] #runVideo for: ${this.name}`)
+
 		const source = new MediaStreamTrackProcessor({ track })
 		const encoder = new Video.Encoder(config)
 		const container = new Container()
@@ -71,6 +77,8 @@ export class Track {
 	}
 
 	async #write(chunk: Chunk) {
+		console.log(`[Track: ${this.name}] #write received chunk of type: ${chunk.type}`)
+
 		if (chunk.type === "init") {
 			this.#init = chunk.data
 			this.#notify.wake()
@@ -79,6 +87,8 @@ export class Track {
 
 		let current = this.#segments.at(-1)
 		if (!current || chunk.type === "key") {
+			console.log(`[Track: ${this.name}] Keyframe received or first segment. Creating new segment.`)
+
 			if (current) {
 				await current.input.close()
 			}
@@ -106,6 +116,7 @@ export class Track {
 		const writer = current.input.getWriter()
 
 		if ((writer.desiredSize || 0) > 0) {
+			console.log(`[Track: ${this.name}] Writing chunk to segment ${current.id}`)
 			await writer.write(chunk)
 		} else {
 			console.warn("dropping chunk", writer.desiredSize)
@@ -119,6 +130,7 @@ export class Track {
 
 		const current = this.#segments.at(-1)
 		if (current) {
+			console.log(`[Track: ${this.name}] Closing segment ${current.id}`)
 			await current.input.close()
 		}
 

@@ -45,8 +45,9 @@ export class Renderer {
 
 	pause() {
 		this.#paused = true
+		console.log(`[VideoWorker] pause called, decoder state: ${this.#decoder.state}`)
 		this.#decoder.flush().catch((err) => {
-			console.error(err)
+			console.error("Failed to flush video decoder on pause:", err)
 		})
 		this.#waitingForKeyframe = true
 	}
@@ -80,13 +81,19 @@ export class Renderer {
 			output: (frame: VideoFrame) => {
 				controller.enqueue(frame)
 			},
-			error: console.error,
+			error: (e: Error) => {
+				console.error("VideoDecoder error:", e)
+			},
 		})
 	}
 
 	#transform(frame: Frame) {
+		console.log(
+			`[VideoWorker] #transform received frame. track: ${frame.track.codec}, sync: ${frame.sample.is_sync}, state: ${this.#decoder.state}`,
+		)
+
 		if (this.#decoder.state === "closed" || this.#paused) {
-			console.warn("Decoder is closed or paused. Skipping frame.")
+			console.warn("[VideoWorker] Decoder is closed or paused. Skipping frame.")
 			return
 		}
 
@@ -109,9 +116,17 @@ export class Renderer {
 
 		// Configure the decoder with the first frame
 		if (this.#decoder.state !== "configured") {
+			console.log("[VideoWorker] Decoder is not configured. Attempting to configure.")
+
 			const desc = sample.description
+			console.log("[VideoWorker] Received init segment description:", desc)
 			const box = desc.avcC ?? desc.hvcC ?? desc.vpcC ?? desc.av1C
-			if (!box) throw new Error(`unsupported codec: ${track.codec}`)
+			if (!box) {
+				console.error(
+					"[VideoWorker] FAILED: No valid codec configuration box (avcC, etc.) found in init segment.",
+				)
+				throw new Error(`unsupported codec: ${track.codec}`)
+			}
 
 			const buffer = new MP4.Stream(undefined, 0, MP4.Stream.BIG_ENDIAN)
 			box.write(buffer)
@@ -127,7 +142,16 @@ export class Renderer {
 				// optimizeForLatency: true
 			}
 
-			this.#decoder.configure(this.#decoderConfig)
+			console.log("[VideoWorker] Configuring decoder with:", this.#decoderConfig)
+
+			try {
+				this.#decoder.configure(this.#decoderConfig)
+				console.log(`[VideoWorker] Decoder configured successfully. New state: ${this.#decoder.state}`)
+			} catch (e) {
+				console.error("[VideoWorker] FAILED to configure decoder:", e)
+				return // Stop processing if configure fails
+			}
+
 			if (!frame.sample.is_sync) {
 				this.#waitingForKeyframe = true
 			} else {
@@ -158,7 +182,12 @@ export class Renderer {
 				timestamp: frame.sample.dts / frame.track.timescale,
 			})
 
-			this.#decoder.decode(chunk)
+			console.log(`[VideoWorker] Decoding chunk, type: ${chunk.type}, size: ${chunk.byteLength}`)
+			try {
+				this.#decoder.decode(chunk)
+			} catch (e) {
+				console.error("[VideoWorker] FAILED to decode chunk:", e)
+			}
 		}
 	}
 }

@@ -104,6 +104,7 @@ export class Broadcast {
 	}
 
 	async #run() {
+		console.log("[Broadcast] #run loop started")
 		await this.connection.announce(this.namespace)
 
 		for (;;) {
@@ -119,6 +120,7 @@ export class Broadcast {
 	}
 
 	async #serveSubscribe(subscriber: SubscribeRecv) {
+		console.log(`[Broadcast] #serveSubscribe for: ${subscriber.track}`)
 		try {
 			const [base, ext] = splitExt(subscriber.track)
 			if (ext === "catalog") {

@@ -94,6 +94,8 @@ export default class Player extends EventTarget {
 			if (track.name === this.#videoTrackName || track.name === this.#audioTrackName) {
 				if (!track.namespace) throw new Error("track has no namespace")
 				if (track.initTrack) inits.add([track.namespace.join("/"), track.initTrack])
+				// log every track we push here
+				console.log("pushing track", track.name)
 				tracks.push(track)
 			}
 		})
@@ -110,6 +112,7 @@ export default class Player extends EventTarget {
 	}
 
 	async #runInit(namespace: string, name: string) {
+		console.log("running init for", namespace, name)
 		const sub = await this.#connection.subscribe([namespace], name)
 		try {
 			const init = await Promise.race([sub.data(), this.#running])
