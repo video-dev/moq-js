@@ -86,12 +86,12 @@ export class Publisher {
 		this.#subscribe.set(msg.id, subscribe)
 		await this.#subscribeQueue.push(subscribe)
 
-		await this.#control.send({
-			kind: Control.Msg.SubscribeOk,
-			id: msg.id,
-			expires: 0n,
-			group_order: msg.group_order,
-		})
+		// await this.#control.send({
+		// 	kind: Control.Msg.SubscribeOk,
+		// 	id: msg.id,
+		// 	expires: 0n,
+		// 	group_order: msg.group_order,
+		// })
 	}
 
 	recvUnsubscribe(_msg: Control.Unsubscribe) {
