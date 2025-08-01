@@ -73,7 +73,7 @@ export class Broadcast {
 					name: `${track.name}.m4s`,
 					initTrack: `${track.name}.mp4`,
 					selectionParams: {
-						mimeType: "audio/ogg",
+						mimeType: "audio/mp4",
 						codec: config.audio.codec,
 						samplerate: settings.sampleRate,
 						//sampleSize: settings.sampleSize,
