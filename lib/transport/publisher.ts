@@ -10,32 +10,34 @@ export class Publisher {
 	#objects: Objects
 
 	// Our announced tracks.
-	#announce = new Map<string, AnnounceSend>()
+	#publishedNamespaces = new Map<string, PublishNamespaceSend>()
 
 	// Their subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeRecv>()
 	#subscribeQueue = new Queue<SubscribeRecv>(Number.MAX_SAFE_INTEGER) // Unbounded queue in case there's no receiver
+
+	// Track alias counter (publisher assigns these in draft-14)
+	#nextTrackAlias = 0n
 
 	constructor(control: Control.Stream, objects: Objects) {
 		this.#control = control
 		this.#objects = objects
 	}
 
-	// Announce a track namespace.
-	async announce(namespace: string[]): Promise<AnnounceSend> {
-		if (this.#announce.has(namespace.join("/"))) {
+	async publish_namespace(namespace: string[]): Promise<PublishNamespaceSend> {
+		if (this.#publishedNamespaces.has(namespace.join("/"))) {
 			throw new Error(`already announced: ${namespace.join("/")}`)
 		}
 
-		const announce = new AnnounceSend(this.#control, namespace)
-		this.#announce.set(namespace.join("/"), announce)
+		const publishNamespaceSend = new PublishNamespaceSend(this.#control, namespace)
+		this.#publishedNamespaces.set(namespace.join("/"), publishNamespaceSend)
 
 		await this.#control.send({
-			kind: Control.Msg.Announce,
+			kind: Control.Msg.PublishNamespace,
 			namespace,
 		})
 
-		return announce
+		return publishNamespaceSend
 	}
 
 	// Receive the next new subscription
@@ -48,33 +50,33 @@ export class Publisher {
 			await this.recvSubscribe(msg)
 		} else if (msg.kind == Control.Msg.Unsubscribe) {
 			this.recvUnsubscribe(msg)
-		} else if (msg.kind == Control.Msg.AnnounceOk) {
-			this.recvAnnounceOk(msg)
-		} else if (msg.kind == Control.Msg.AnnounceError) {
-			this.recvAnnounceError(msg)
+		} else if (msg.kind == Control.Msg.PublishNamespaceOk) {
+			this.recvPublishNamespaceOk(msg)
+		} else if (msg.kind == Control.Msg.PublishNamespaceError) {
+			this.recvPublishNamespaceError(msg)
 		} else {
 			throw new Error(`unknown control message`) // impossible
 		}
 	}
 
-	recvAnnounceOk(msg: Control.AnnounceOk) {
-		const announce = this.#announce.get(msg.namespace.join("/"))
-		if (!announce) {
-			throw new Error(`announce OK for unknown announce: ${msg.namespace.join("/")}`)
+	recvPublishNamespaceOk(msg: Control.PublishNamespaceOk) {
+		const publishNamespaceSend = this.#publishedNamespaces.get(msg.namespace.join("/"))
+		if (!publishNamespaceSend) {
+			throw new Error(`publish namespace OK for unknown announce: ${msg.namespace.join("/")}`)
 		}
 
-		announce.onOk()
+		publishNamespaceSend.onOk()
 	}
 
-	recvAnnounceError(msg: Control.AnnounceError) {
-		const announce = this.#announce.get(msg.namespace.join("/"))
-		if (!announce) {
+	recvPublishNamespaceError(msg: Control.PublishNamespaceError) {
+		const publishNamespaceSend = this.#publishedNamespaces.get(msg.namespace.join("/"))
+		if (!publishNamespaceSend) {
 			// TODO debug this
-			console.warn(`announce error for unknown announce: ${msg.namespace.join("/")}`)
+			console.warn(`publish namespace error for unknown announce: ${msg.namespace.join("/")}`)
 			return
 		}
 
-		announce.onError(msg.code, msg.reason)
+		publishNamespaceSend.onError(msg.code, msg.reason)
 	}
 
 	async recvSubscribe(msg: Control.Subscribe) {
@@ -82,15 +84,19 @@ export class Publisher {
 			throw new Error(`duplicate subscribe for id: ${msg.id}`)
 		}
 
-		const subscribe = new SubscribeRecv(this.#control, this.#objects, msg)
+		const trackAlias = this.#nextTrackAlias++
+		const subscribe = new SubscribeRecv(this.#control, this.#objects, msg, trackAlias)
 		this.#subscribe.set(msg.id, subscribe)
 		await this.#subscribeQueue.push(subscribe)
 
+		// NOTE(itzmanish): revisit this
 		await this.#control.send({
 			kind: Control.Msg.SubscribeOk,
 			id: msg.id,
 			expires: 0n,
+			content_exists: 0,
 			group_order: msg.group_order,
+			track_alias: trackAlias,
 		})
 	}
 
@@ -99,7 +105,7 @@ export class Publisher {
 	}
 }
 
-export class AnnounceSend {
+export class PublishNamespaceSend {
 	#control: Control.Stream
 
 	readonly namespace: string[]
@@ -113,7 +119,7 @@ export class AnnounceSend {
 	}
 
 	async ok() {
-		for (;;) {
+		for (; ;) {
 			const [state, next] = this.#state.value()
 			if (state === "ack") return
 			if (state instanceof Error) throw state
@@ -124,7 +130,7 @@ export class AnnounceSend {
 	}
 
 	async active() {
-		for (;;) {
+		for (; ;) {
 			const [state, next] = this.#state.value()
 			if (state instanceof Error) throw state
 			if (!next) return
@@ -151,7 +157,7 @@ export class AnnounceSend {
 	onError(code: bigint, reason: string) {
 		if (this.closed()) return
 
-		const err = new Error(`ANNOUNCE_ERROR (${code})` + reason ? `: ${reason}` : "")
+		const err = new Error(`PUBLISH_NAMESPACE_ERROR (${code})` + reason ? `: ${reason}` : "")
 		this.#state.update(err)
 	}
 }
@@ -160,7 +166,7 @@ export class SubscribeRecv {
 	#control: Control.Stream
 	#objects: Objects
 	#id: bigint
-	#trackId: bigint
+	#trackAlias: bigint // Publisher-specified in draft-14
 	#subscriberPriority: number
 	groupOrder: Control.GroupOrder
 
@@ -170,11 +176,11 @@ export class SubscribeRecv {
 	// The current state of the subscription.
 	#state: "init" | "ack" | "closed" = "init"
 
-	constructor(control: Control.Stream, objects: Objects, msg: Control.Subscribe) {
+	constructor(control: Control.Stream, objects: Objects, msg: Control.Subscribe, trackAlias: bigint) {
 		this.#control = control // so we can send messages
 		this.#objects = objects // so we can send objects
 		this.#id = msg.id
-		this.#trackId = msg.trackId
+		this.#trackAlias = trackAlias
 		this.namespace = msg.namespace
 		this.track = msg.name
 		this.#subscriberPriority = msg.subscriber_priority
@@ -186,12 +192,15 @@ export class SubscribeRecv {
 		if (this.#state !== "init") return
 		this.#state = "ack"
 
+		// NOTE(itzmanish): revisit this
 		// Send the control message.
 		return this.#control.send({
 			kind: Control.Msg.SubscribeOk,
 			id: this.#id,
 			expires: 0n,
 			group_order: this.groupOrder,
+			track_alias: this.#trackAlias,
+			content_exists: 0,
 		})
 	}
 
@@ -201,10 +210,8 @@ export class SubscribeRecv {
 		this.#state = "closed"
 
 		return this.#control.send({
-			kind: Control.Msg.SubscribeDone,
+			kind: Control.Msg.Unsubscribe,
 			id: this.#id,
-			code,
-			reason,
 		})
 	}
 
@@ -213,7 +220,7 @@ export class SubscribeRecv {
 		return this.#objects.send({
 			type: StreamType.Track,
 			sub: this.#id,
-			track: this.#trackId,
+			track: this.#trackAlias,
 			publisher_priority: props?.priority ?? 127,
 		})
 	}
@@ -223,7 +230,7 @@ export class SubscribeRecv {
 		return this.#objects.send({
 			type: StreamType.Subgroup,
 			sub: this.#id,
-			track: this.#trackId,
+			track: this.#trackAlias,
 			group: props.group,
 			subgroup: props.subgroup,
 			publisher_priority: props.priority ?? 127,

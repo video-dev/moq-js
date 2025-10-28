@@ -43,12 +43,12 @@ export class Connection {
 		await Promise.all([this.#runControl(), this.#runObjects()])
 	}
 
-	announce(namespace: string[]) {
-		return this.#publisher.announce(namespace)
+	publish_namespace(namespace: string[]) {
+		return this.#publisher.publish_namespace(namespace)
 	}
 
-	announced() {
-		return this.#subscriber.announced()
+	publishedNamespaces() {
+		return this.#subscriber.publishedNamespaces()
 	}
 
 	subscribe(namespace: string[], track: string) {
@@ -65,14 +65,14 @@ export class Connection {
 
 	async #runControl() {
 		// Receive messages until the connection is closed.
-		for (;;) {
+		for (; ;) {
 			const msg = await this.#control.recv()
 			await this.#recv(msg)
 		}
 	}
 
 	async #runObjects() {
-		for (;;) {
+		for (; ;) {
 			const obj = await this.#objects.recv()
 			if (!obj) break
 

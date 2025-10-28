@@ -104,9 +104,9 @@ export class Broadcast {
 	}
 
 	async #run() {
-		await this.connection.announce(this.namespace)
+		await this.connection.publish_namespace(this.namespace)
 
-		for (;;) {
+		for (; ;) {
 			const subscriber = await this.connection.subscribed()
 			if (!subscriber) break
 
@@ -176,7 +176,7 @@ export class Broadcast {
 
 		const segments = track.segments().getReader()
 
-		for (;;) {
+		for (; ;) {
 			const { value: segment, done } = await segments.read()
 			if (done) break
 
@@ -200,7 +200,7 @@ export class Broadcast {
 
 		// Pipe the segment to the stream.
 		const chunks = segment.chunks().getReader()
-		for (;;) {
+		for (; ;) {
 			const { value, done } = await chunks.read()
 			if (done) break
 

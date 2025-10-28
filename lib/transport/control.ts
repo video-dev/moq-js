@@ -3,24 +3,31 @@ import { Reader, Writer } from "./stream"
 export type Message = Subscriber | Publisher
 
 // Sent by subscriber
-export type Subscriber = Subscribe | Unsubscribe | AnnounceOk | AnnounceError | Fetch | FetchCancel
+export type Subscriber = Subscribe | SubscribeUpdate | Unsubscribe | PublishOk | PublishError | PublishNamespaceOk | PublishNamespaceError | Fetch | FetchCancel
 
 export function isSubscriber(m: Message): m is Subscriber {
 	return (
-		m.kind == Msg.Subscribe || m.kind == Msg.Unsubscribe || m.kind == Msg.AnnounceOk || m.kind == Msg.AnnounceError
+		m.kind == Msg.Subscribe ||
+		m.kind == Msg.SubscribeUpdate ||
+		m.kind == Msg.Unsubscribe ||
+		m.kind == Msg.PublishOk ||
+		m.kind == Msg.PublishError ||
+		m.kind == Msg.PublishNamespaceOk ||
+		m.kind == Msg.PublishNamespaceError
 	)
 }
 
 // Sent by publisher
-export type Publisher = SubscribeOk | SubscribeError | SubscribeDone | Announce | Unannounce | FetchOk | FetchError
+export type Publisher = SubscribeOk | SubscribeError | PublishDone | Publish | PublishNamespace | PublishNamespaceDone | FetchOk | FetchError
 
 export function isPublisher(m: Message): m is Publisher {
 	return (
 		m.kind == Msg.SubscribeOk ||
 		m.kind == Msg.SubscribeError ||
-		m.kind == Msg.SubscribeDone ||
-		m.kind == Msg.Announce ||
-		m.kind == Msg.Unannounce
+		m.kind == Msg.PublishDone ||
+		m.kind == Msg.Publish ||
+		m.kind == Msg.PublishNamespace ||
+		m.kind == Msg.PublishNamespaceDone
 	)
 }
 
@@ -29,15 +36,19 @@ export function isPublisher(m: Message): m is Publisher {
 // We'll take the tiny performance hit until I'm better at Typescript.
 export enum Msg {
 	// NOTE: object and setup are in other modules
+	SubscribeUpdate = "subscribe_update",
 	Subscribe = "subscribe",
 	SubscribeOk = "subscribe_ok",
 	SubscribeError = "subscribe_error",
-	SubscribeDone = "subscribe_done",
 	Unsubscribe = "unsubscribe",
-	Announce = "announce",
-	AnnounceOk = "announce_ok",
-	AnnounceError = "announce_error",
-	Unannounce = "unannounce",
+	Publish = "publish",
+	PublishOk = "publish_ok",
+	PublishError = "publish_error",
+	PublishDone = "publish_done",
+	PublishNamespace = "publish_namespace",
+	PublishNamespaceOk = "publish_namespace_ok",
+	PublishNamespaceError = "publish_namespace_error",
+	PublishNamespaceDone = "publish_namespace_done",
 	GoAway = "go_away",
 	Fetch = "fetch",
 	FetchCancel = "fetch_cancel",
@@ -50,15 +61,19 @@ enum Id {
 	// Object = 0,
 	// Setup = 1,
 
+	SubscribeUpdate = 0x2,
 	Subscribe = 0x3,
 	SubscribeOk = 0x4,
 	SubscribeError = 0x5,
-	SubscribeDone = 0xb,
 	Unsubscribe = 0xa,
-	Announce = 0x6,
-	AnnounceOk = 0x7,
-	AnnounceError = 0x8,
-	Unannounce = 0x9,
+	PublishDone = 0xb,
+	Publish = 0x1d,
+	PublishOk = 0x1e,
+	PublishError = 0x1f,
+	PublishNamespace = 0x6,
+	PublishNamespaceOk = 0x7,
+	PublishNamespaceError = 0x8,
+	PublishNamespaceDone = 0x9,
 	GoAway = 0x10,
 	Fetch = 0x16,
 	FetchCancel = 0x17,
@@ -69,14 +84,16 @@ enum Id {
 export interface Subscribe {
 	kind: Msg.Subscribe
 
-	id: bigint
-	trackId: bigint
+	id: bigint // Request ID in draft-14
 	namespace: string[]
 	name: string
 	subscriber_priority: number
 	group_order: GroupOrder
+	forward: number // 0 or 1
+	filter_type: FilterType
+	start_location?: Location
+	end_group?: bigint
 
-	location: Location
 
 	params?: Parameters
 }
@@ -87,47 +104,41 @@ export enum GroupOrder {
 	Descending = 0x2,
 }
 
-export type Location = LatestGroup | LatestObject | AbsoluteStart | AbsoluteRange
-
-export interface LatestGroup {
-	mode: "latest_group"
+export enum FilterType {
+	NextGroupStart = 0x1,
+	LargestObject = 0x2,
+	AbsoluteStart = 0x3,
+	AbsoluteRange = 0x4,
 }
 
-export interface LatestObject {
-	mode: "latest_object"
+export type Location = {
+	group: bigint
+	object: bigint
 }
 
-export interface AbsoluteStart {
-	mode: "absolute_start"
-	start_group: number
-	start_object: number
-}
-
-export interface AbsoluteRange {
-	mode: "absolute_range"
-	start_group: number
-	start_object: number
-	end_group: number
-	end_object: number
-}
 
 export type Parameters = Map<bigint, Uint8Array>
 
 export interface SubscribeOk {
 	kind: Msg.SubscribeOk
-	id: bigint
+	id: bigint // Request ID
+	track_alias: bigint // Publisher-specified in draft-14
 	expires: bigint
 	group_order: GroupOrder
-	latest?: [number, number]
+	content_exists: number // 0 or 1
+	largest_location?: Location
 	params?: Parameters
 }
 
-export interface SubscribeDone {
-	kind: Msg.SubscribeDone
+export interface SubscribeUpdate {
+	kind: Msg.SubscribeUpdate
 	id: bigint
-	code: bigint
-	reason: string
-	final?: [number, number]
+	subscription_id: bigint
+	start_location: Location
+	end_group: bigint
+	subscriber_priority: number
+	forward: number
+	params?: Parameters
 }
 
 export interface SubscribeError {
@@ -135,7 +146,6 @@ export interface SubscribeError {
 	id: bigint
 	code: bigint
 	reason: string
-	//trackAlias?: bigint
 }
 
 export interface Unsubscribe {
@@ -143,26 +153,67 @@ export interface Unsubscribe {
 	id: bigint
 }
 
-export interface Announce {
-	kind: Msg.Announce
+export interface Publish {
+	kind: Msg.Publish
+	id: bigint // Request ID
+	track_alias: bigint // Publisher-specified
+	namespace: string[]
+	name: string
+	content_exists: number // 0 or 1
+	group_order: GroupOrder
+	largest_location?: Location // largest location of group or object if content_exists == 1
+	forward: number // 0 or 1
+	params?: Parameters
+}
+
+export interface PublishDone {
+	kind: Msg.PublishDone
+	id: bigint
+	code: bigint
+	stream_count: bigint
+	reason: string
+}
+
+
+export interface PublishOk {
+	kind: Msg.PublishOk
+	id: bigint // Request ID
+	forward: number // 0 or 1
+	subscriber_priority: number
+	group_order: GroupOrder
+	filter_type: FilterType
+	start_location?: Location
+	end_group?: bigint
+	params?: Parameters
+}
+
+export interface PublishError {
+	kind: Msg.PublishError
+	id: bigint
+	code: bigint
+	reason: string
+}
+
+export interface PublishNamespace {
+	kind: Msg.PublishNamespace
 	namespace: string[]
 	params?: Parameters
 }
 
-export interface AnnounceOk {
-	kind: Msg.AnnounceOk
+export interface PublishNamespaceOk {
+	kind: Msg.PublishNamespaceOk
 	namespace: string[]
 }
 
-export interface AnnounceError {
-	kind: Msg.AnnounceError
+export interface PublishNamespaceError {
+	kind: Msg.PublishNamespaceError
 	namespace: string[]
 	code: bigint
 	reason: string
 }
 
-export interface Unannounce {
-	kind: Msg.Unannounce
+export interface PublishNamespaceDone {
+	kind: Msg.PublishNamespaceDone
 	namespace: string[]
 }
 
@@ -272,20 +323,28 @@ export class Decoder {
 				return Msg.Subscribe
 			case Id.SubscribeOk:
 				return Msg.SubscribeOk
-			case Id.SubscribeDone:
-				return Msg.SubscribeDone
 			case Id.SubscribeError:
 				return Msg.SubscribeError
+			case Id.SubscribeUpdate:
+				return Msg.SubscribeUpdate
 			case Id.Unsubscribe:
 				return Msg.Unsubscribe
-			case Id.Announce:
-				return Msg.Announce
-			case Id.AnnounceOk:
-				return Msg.AnnounceOk
-			case Id.AnnounceError:
-				return Msg.AnnounceError
-			case Id.Unannounce:
-				return Msg.Unannounce
+			case Id.Publish:
+				return Msg.Publish
+			case Id.PublishDone:
+				return Msg.PublishDone
+			case Id.PublishOk:
+				return Msg.PublishOk
+			case Id.PublishError:
+				return Msg.PublishError
+			case Id.PublishNamespace:
+				return Msg.PublishNamespace
+			case Id.PublishNamespaceOk:
+				return Msg.PublishNamespaceOk
+			case Id.PublishNamespaceError:
+				return Msg.PublishNamespaceError
+			case Id.PublishNamespaceDone:
+				return Msg.PublishNamespaceDone
 			case Id.GoAway:
 				return Msg.GoAway
 			case Id.Fetch:
@@ -296,6 +355,8 @@ export class Decoder {
 				return Msg.FetchOk
 			case Id.FetchError:
 				return Msg.FetchError
+			default:
+				throw new Error(`unknown message type: ${t}`)
 		}
 	}
 
@@ -308,18 +369,26 @@ export class Decoder {
 				return this.subscribe_ok()
 			case Msg.SubscribeError:
 				return this.subscribe_error()
-			case Msg.SubscribeDone:
-				return this.subscribe_done()
+			case Msg.SubscribeUpdate:
+				return this.subscribe_update()
 			case Msg.Unsubscribe:
 				return this.unsubscribe()
-			case Msg.Announce:
-				return this.announce()
-			case Msg.AnnounceOk:
-				return this.announce_ok()
-			case Msg.Unannounce:
-				return this.unannounce()
-			case Msg.AnnounceError:
-				return this.announce_error()
+			case Msg.Publish:
+				return this.publish()
+			case Msg.PublishDone:
+				return this.publish_done()
+			case Msg.PublishOk:
+				return this.publish_ok()
+			case Msg.PublishError:
+				return this.publish_error()
+			case Msg.PublishNamespace:
+				return this.publish_namespace()
+			case Msg.PublishNamespaceOk:
+				return this.publish_namespace_ok()
+			case Msg.PublishNamespaceDone:
+				return this.publish_namespace_done()
+			case Msg.PublishNamespaceError:
+				return this.publish_namespace_error()
 			case Msg.GoAway:
 				throw new Error("TODO: implement go away")
 			case Msg.Fetch:
@@ -330,21 +399,37 @@ export class Decoder {
 				return this.fetchOk()
 			case Msg.FetchError:
 				return this.fetchError()
+			default:
+				throw new Error(`unknown message kind: ${t}`)
 		}
 	}
 
 	private async subscribe(): Promise<Subscribe> {
-		return {
+		const id = await this.r.u62()
+		const namespace = await this.r.tuple()
+		const name = await this.r.string()
+		const subscriberPriority = await this.r.u8()
+		const groupOrder = await this.decodeGroupOrder()
+		const forward = await this.r.u8()
+		const filter_type = await this.decodeFilterType()
+		const subMsg: Subscribe = {
 			kind: Msg.Subscribe,
-			id: await this.r.u62(),
-			trackId: await this.r.u62(),
-			namespace: await this.r.tuple(),
-			name: await this.r.string(),
-			subscriber_priority: await this.r.u8(),
-			group_order: await this.decodeGroupOrder(),
-			location: await this.location(),
-			params: await this.parameters(),
+			id,
+			namespace,
+			name,
+			subscriber_priority: subscriberPriority,
+			group_order: groupOrder,
+			forward: forward,
+			filter_type,
 		}
+		if (filter_type == FilterType.AbsoluteRange || filter_type == FilterType.AbsoluteStart) {
+			subMsg.start_location = await this.location()
+		}
+		if (filter_type == FilterType.AbsoluteRange) {
+			subMsg.end_group = await this.r.u62()
+		}
+		subMsg.params = await this.parameters()
+		return subMsg
 	}
 
 	private async decodeGroupOrder(): Promise<GroupOrder> {
@@ -357,36 +442,31 @@ export class Decoder {
 			case 2:
 				return GroupOrder.Descending
 			default:
+				// TODO(itzmanish): protocol violation error
 				throw new Error(`Invalid GroupOrder value: ${orderCode}`)
 		}
 	}
 
+	private async decodeFilterType(): Promise<FilterType> {
+		const filterType = await this.r.u62()
+		switch (filterType) {
+			case 1n:
+				return FilterType.NextGroupStart
+			case 2n:
+				return FilterType.LargestObject
+			case 3n:
+				return FilterType.AbsoluteStart
+			case 4n:
+				return FilterType.AbsoluteRange
+			default:
+				throw new Error(`Invalid FilterType value: ${filterType}`)
+		}
+	}
+
 	private async location(): Promise<Location> {
-		const mode = await this.r.u62()
-		if (mode == 1n) {
-			return {
-				mode: "latest_group",
-			}
-		} else if (mode == 2n) {
-			return {
-				mode: "latest_object",
-			}
-		} else if (mode == 3n) {
-			return {
-				mode: "absolute_start",
-				start_group: await this.r.u53(),
-				start_object: await this.r.u53(),
-			}
-		} else if (mode == 4n) {
-			return {
-				mode: "absolute_range",
-				start_group: await this.r.u53(),
-				start_object: await this.r.u53(),
-				end_group: await this.r.u53(),
-				end_object: await this.r.u53(),
-			}
-		} else {
-			throw new Error(`invalid filter type: ${mode}`)
+		return {
+			group: await this.r.u62(),
+			object: await this.r.u62(),
 		}
 	}
 
@@ -413,18 +493,17 @@ export class Decoder {
 
 	private async subscribe_ok(): Promise<SubscribeOk> {
 		const id = await this.r.u62()
+		const track_alias = await this.r.u62()
 		const expires = await this.r.u62()
 
 		const group_order = await this.decodeGroupOrder()
-		let latest: [number, number] | undefined
+		const content_exists = await this.r.u8()
 
-		const flag = await this.r.u8()
-		if (flag === 1) {
-			//       [largest group id,   largest object id]
-			latest = [await this.r.u53(), await this.r.u53()]
-		} else if (flag !== 0) {
-			throw new Error(`invalid final flag: ${flag}`)
+		let location: Location | undefined
+		if (content_exists == 1) {
+			location = await this.location()
 		}
+
 		// @todo: actually consume params once we implement them in moq-rs
 		const params = await this.parameters()
 		return {
@@ -432,31 +511,23 @@ export class Decoder {
 			id,
 			expires,
 			group_order,
-			latest,
+			track_alias,
+			content_exists,
+			largest_location: location,
 			params,
 		}
 	}
 
-	private async subscribe_done(): Promise<SubscribeDone> {
-		const id = await this.r.u62()
-		const code = await this.r.u62()
-		const reason = await this.r.string()
-
-		let final: [number, number] | undefined
-
-		const flag = await this.r.u8()
-		if (flag === 1) {
-			final = [await this.r.u53(), await this.r.u53()]
-		} else if (flag !== 0) {
-			throw new Error(`invalid final flag: ${flag}`)
-		}
-
+	private async subscribe_update(): Promise<SubscribeUpdate> {
 		return {
-			kind: Msg.SubscribeDone,
-			id,
-			code,
-			reason,
-			final,
+			kind: Msg.SubscribeUpdate,
+			id: await this.r.u62(),
+			subscription_id: await this.r.u62(),
+			start_location: await this.location(),
+			end_group: await this.r.u62(),
+			subscriber_priority: await this.r.u8(),
+			forward: await this.r.u8(),
+			params: await this.parameters(),
 		}
 	}
 
@@ -476,35 +547,110 @@ export class Decoder {
 		}
 	}
 
-	private async announce(): Promise<Announce> {
+	private async publish_done(): Promise<PublishDone> {
+		return {
+			kind: Msg.PublishDone,
+			id: await this.r.u62(),
+			code: await this.r.u62(),
+			stream_count: await this.r.u62(),
+			reason: await this.r.string(),
+		}
+	}
+
+	private async publish(): Promise<Publish> {
+		const id = await this.r.u62()
+		const namespace = await this.r.tuple()
+		const name = await this.r.string()
+		const track_alias = await this.r.u62()
+		const group_order = await this.decodeGroupOrder()
+		const content_exists = await this.r.u8()
+		let location: Location | undefined
+		if (content_exists == 1) {
+			location = await this.location()
+		}
+		const forward = await this.r.u8()
+		const params = await this.parameters()
+		return {
+			kind: Msg.Publish,
+			id,
+			namespace,
+			name,
+			track_alias,
+			group_order,
+			content_exists,
+			largest_location: location,
+			forward,
+			params,
+		}
+	}
+
+	private async publish_ok(): Promise<PublishOk> {
+		const id = await this.r.u62()
+		const forward = await this.r.u8()
+		const subscriber_priority = await this.r.u8()
+		const group_order = await this.decodeGroupOrder()
+		const filter_type = await this.decodeFilterType()
+		let start_location: Location | undefined
+		let end_group: bigint | undefined
+		if (filter_type == FilterType.AbsoluteRange || filter_type == FilterType.AbsoluteStart) {
+			start_location = await this.location()
+		}
+		if (filter_type == FilterType.AbsoluteRange) {
+			end_group = await this.r.u62()
+		}
+
+		const params = await this.parameters()
+		return {
+			kind: Msg.PublishOk,
+			id,
+			forward,
+			subscriber_priority,
+			group_order,
+			filter_type,
+			start_location,
+			end_group,
+			params,
+		}
+	}
+
+	private async publish_error(): Promise<PublishError> {
+		return {
+			kind: Msg.PublishError,
+			id: await this.r.u62(),
+			code: await this.r.u62(),
+			reason: await this.r.string(),
+		}
+	}
+
+	private async publish_namespace(): Promise<PublishNamespace> {
 		const namespace = await this.r.tuple()
 
 		return {
-			kind: Msg.Announce,
+			kind: Msg.PublishNamespace,
 			namespace,
 			params: await this.parameters(),
 		}
 	}
 
-	private async announce_ok(): Promise<AnnounceOk> {
+	private async publish_namespace_ok(): Promise<PublishNamespaceOk> {
 		return {
-			kind: Msg.AnnounceOk,
+			kind: Msg.PublishNamespaceOk,
 			namespace: await this.r.tuple(),
 		}
 	}
 
-	private async announce_error(): Promise<AnnounceError> {
+	private async publish_namespace_error(): Promise<PublishNamespaceError> {
 		return {
-			kind: Msg.AnnounceError,
+			kind: Msg.PublishNamespaceError,
 			namespace: await this.r.tuple(),
 			code: await this.r.u62(),
 			reason: await this.r.string(),
 		}
 	}
 
-	private async unannounce(): Promise<Unannounce> {
+	private async publish_namespace_done(): Promise<PublishNamespaceDone> {
 		return {
-			kind: Msg.Unannounce,
+			kind: Msg.PublishNamespaceDone,
 			namespace: await this.r.tuple(),
 		}
 	}
@@ -569,18 +715,26 @@ export class Encoder {
 				return this.subscribe_ok(m)
 			case Msg.SubscribeError:
 				return this.subscribe_error(m)
-			case Msg.SubscribeDone:
-				return this.subscribe_done(m)
+			case Msg.SubscribeUpdate:
+				return this.subscribe_update(m)
 			case Msg.Unsubscribe:
 				return this.unsubscribe(m)
-			case Msg.Announce:
-				return this.announce(m)
-			case Msg.AnnounceOk:
-				return this.announce_ok(m)
-			case Msg.AnnounceError:
-				return this.announce_error(m)
-			case Msg.Unannounce:
-				return this.unannounce(m)
+			case Msg.Publish:
+				return this.publish(m)
+			case Msg.PublishDone:
+				return this.publish_done(m)
+			case Msg.PublishOk:
+				return this.publish_ok(m)
+			case Msg.PublishError:
+				return this.publish_error(m)
+			case Msg.PublishNamespace:
+				return this.publish_namespace(m)
+			case Msg.PublishNamespaceOk:
+				return this.publish_namespace_ok(m)
+			case Msg.PublishNamespaceError:
+				return this.publish_namespace_error(m)
+			case Msg.PublishNamespaceDone:
+				return this.publish_namespace_done(m)
 			case Msg.Fetch:
 				return this.fetch(m)
 			case Msg.FetchCancel:
@@ -589,24 +743,56 @@ export class Encoder {
 				return this.fetchOk(m)
 			case Msg.FetchError:
 				return this.fetchError(m)
+			default:
+				throw new Error(`unknown message kind in encoder`)
 		}
 	}
 
 	async subscribe(s: Subscribe) {
 		const buffer = new Uint8Array(8)
 
-		const msgData = this.w.concatBuffer([
+		let msgData = this.w.concatBuffer([
 			this.w.setVint62(buffer, s.id),
-			this.w.setVint62(buffer, s.trackId),
 			this.w.encodeTuple(buffer, s.namespace),
 			this.w.encodeString(buffer, s.name),
 			this.w.setUint8(buffer, s.subscriber_priority ?? 127),
 			this.w.setUint8(buffer, s.group_order ?? GroupOrder.Publisher),
-			this.encodeLocation(buffer, s.location),
+			this.w.setUint8(buffer, s.forward),
+			this.encodeFilterType(buffer, s.filter_type),
+		])
+
+		if (s.filter_type == FilterType.AbsoluteRange || s.filter_type == FilterType.AbsoluteStart) {
+			msgData = this.w.concatBuffer([msgData, this.encodeLocation(buffer, s.start_location!)])
+		}
+
+		if (s.filter_type == FilterType.AbsoluteRange) {
+			msgData = this.w.concatBuffer([msgData, this.w.setVint62(buffer, s.end_group!)])
+		}
+
+		msgData = this.w.concatBuffer([msgData, this.encodeParameters(buffer, s.params)])
+
+		const messageType = this.w.setVint53(buffer, Id.Subscribe)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async subscribe_update(s: SubscribeUpdate) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, s.id),
+			this.w.setVint62(buffer, s.subscription_id),
+			this.encodeLocation(buffer, s.start_location),
+			this.w.setVint62(buffer, s.end_group),
+			this.w.setUint8(buffer, s.subscriber_priority),
+			this.w.setUint8(buffer, s.forward),
 			this.encodeParameters(buffer, s.params),
 		])
 
-		const messageType = this.w.setVint53(buffer, Id.Subscribe)
+		const messageType = this.w.setVint53(buffer, Id.SubscribeUpdate)
 		const messageLength = this.w.setVint53(buffer, msgData.length)
 
 		for (const elem of [messageType, messageLength, msgData]) {
@@ -617,15 +803,19 @@ export class Encoder {
 	async subscribe_ok(s: SubscribeOk) {
 		const buffer = new Uint8Array(8)
 
-		const msgData = this.w.concatBuffer([
+		let msgData = this.w.concatBuffer([
 			this.w.setVint62(buffer, s.id),
+			this.w.setVint62(buffer, s.track_alias),
 			this.w.setVint62(buffer, s.expires),
 			this.w.setUint8(buffer, s.group_order),
-			this.w.setUint8(buffer, s.latest !== undefined ? 1 : 0),
-			s.latest && this.w.setVint53(buffer, s.latest[0]),
-			s.latest && this.w.setVint53(buffer, s.latest[1]),
-			this.encodeParameters(buffer, s.params),
+			this.w.setUint8(buffer, s.content_exists),
 		])
+
+		if (s.content_exists) {
+			msgData = this.w.concatBuffer([msgData, this.encodeLocation(buffer, s.largest_location!)])
+		}
+
+		msgData = this.w.concatBuffer([msgData, this.encodeParameters(buffer, s.params)])
 
 		const messageType = this.w.setVint53(buffer, Id.SubscribeOk)
 		const messageLength = this.w.setVint53(buffer, msgData.length)
@@ -635,25 +825,6 @@ export class Encoder {
 		}
 	}
 
-	async subscribe_done(s: SubscribeDone) {
-		const buffer = new Uint8Array(8)
-
-		const msgData = this.w.concatBuffer([
-			this.w.setVint62(buffer, s.id),
-			this.w.setVint62(buffer, s.code),
-			this.w.encodeString(buffer, s.reason),
-			this.w.setUint8(buffer, s.final !== undefined ? 1 : 0),
-			s.final && this.w.setVint53(buffer, s.final[0]),
-			s.final && this.w.setVint53(buffer, s.final[1]),
-		])
-
-		const messageType = this.w.setVint53(buffer, Id.SubscribeDone)
-		const messageLength = this.w.setVint53(buffer, msgData.length)
-
-		for (const elem of [messageType, messageLength, msgData]) {
-			await this.w.write(elem)
-		}
-	}
 
 	async subscribe_error(s: SubscribeError) {
 		const buffer = new Uint8Array(8)
@@ -662,7 +833,6 @@ export class Encoder {
 			this.w.setVint62(buffer, s.id),
 			this.w.setVint62(buffer, s.code),
 			this.w.encodeString(buffer, s.reason),
-			//@todo: add trackAlias if error code is 'Retry Track Alias'
 		])
 
 		const messageType = this.w.setVint53(buffer, Id.SubscribeError)
@@ -686,7 +856,101 @@ export class Encoder {
 		}
 	}
 
-	async announce(a: Announce) {
+	async publish(p: Publish) {
+		const buffer = new Uint8Array(8)
+
+		let msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, p.id),
+			this.w.encodeTuple(buffer, p.namespace),
+			this.w.encodeString(buffer, p.name),
+			this.w.setVint62(buffer, p.track_alias),
+			this.w.setUint8(buffer, p.group_order ?? GroupOrder.Publisher),
+			this.w.setUint8(buffer, p.content_exists),
+
+		])
+
+		if (p.content_exists) {
+			msgData = this.w.concatBuffer([msgData, this.encodeLocation(buffer, p.largest_location!)])
+		}
+
+		msgData = this.w.concatBuffer([
+			msgData,
+			this.w.setUint8(buffer, p.forward),
+			this.encodeParameters(buffer, p.params),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.Publish)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async publish_done(p: PublishDone) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, p.id),
+			this.w.setVint62(buffer, p.code),
+			this.w.setVint62(buffer, p.stream_count),
+			this.w.encodeString(buffer, p.reason),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.PublishDone)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async publish_ok(p: PublishOk) {
+		const buffer = new Uint8Array(8)
+
+		let msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, p.id),
+			this.w.setUint8(buffer, p.forward),
+			this.w.setUint8(buffer, p.subscriber_priority),
+			this.w.setUint8(buffer, p.group_order),
+			this.encodeFilterType(buffer, p.filter_type),
+		])
+
+		if (p.filter_type == FilterType.AbsoluteRange || p.filter_type == FilterType.AbsoluteStart) {
+			msgData = this.w.concatBuffer([msgData, this.encodeLocation(buffer, p.start_location!)])
+		}
+
+		if (p.filter_type == FilterType.AbsoluteRange) {
+			msgData = this.w.concatBuffer([msgData, this.w.setVint62(buffer, p.end_group!)])
+		}
+
+		msgData = this.w.concatBuffer([msgData, this.encodeParameters(buffer, p.params)])
+		const messageType = this.w.setVint53(buffer, Id.PublishOk)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async publish_error(p: PublishError) {
+		const buffer = new Uint8Array(8)
+
+		const msgData = this.w.concatBuffer([
+			this.w.setVint62(buffer, p.id),
+			this.w.setVint62(buffer, p.code),
+			this.w.encodeString(buffer, p.reason),
+		])
+
+		const messageType = this.w.setVint53(buffer, Id.PublishError)
+		const messageLength = this.w.setVint53(buffer, msgData.length)
+
+		for (const elem of [messageType, messageLength, msgData]) {
+			await this.w.write(elem)
+		}
+	}
+
+	async publish_namespace(a: PublishNamespace) {
 		const buffer = new Uint8Array(8)
 
 		const msgData = this.w.concatBuffer([
@@ -694,7 +958,7 @@ export class Encoder {
 			this.encodeParameters(buffer, a.params),
 		])
 
-		const messageType = this.w.setVint53(buffer, Id.Announce)
+		const messageType = this.w.setVint53(buffer, Id.PublishNamespace)
 		const messageLength = this.w.setVint53(buffer, msgData.length)
 
 		for (const elem of [messageType, messageLength, msgData]) {
@@ -702,12 +966,12 @@ export class Encoder {
 		}
 	}
 
-	async announce_ok(a: AnnounceOk) {
+	async publish_namespace_ok(a: PublishNamespaceOk) {
 		const buffer = new Uint8Array(8)
 
 		const msgData = this.w.concatBuffer([this.w.encodeTuple(buffer, a.namespace)])
 
-		const messageType = this.w.setVint53(buffer, Id.AnnounceOk)
+		const messageType = this.w.setVint53(buffer, Id.PublishNamespaceOk)
 		const messageLength = this.w.setVint53(buffer, msgData.length)
 
 		for (const elem of [messageType, messageLength, msgData]) {
@@ -715,7 +979,7 @@ export class Encoder {
 		}
 	}
 
-	async announce_error(a: AnnounceError) {
+	async publish_namespace_error(a: PublishNamespaceError) {
 		const buffer = new Uint8Array(8)
 		const msgData = this.w.concatBuffer([
 			this.w.encodeTuple(buffer, a.namespace),
@@ -723,7 +987,7 @@ export class Encoder {
 			this.w.encodeString(buffer, a.reason),
 		])
 
-		const messageType = this.w.setVint53(buffer, Id.AnnounceError)
+		const messageType = this.w.setVint53(buffer, Id.PublishNamespaceError)
 		const messageLength = this.w.setVint53(buffer, msgData.length)
 
 		for (const elem of [messageType, messageLength, msgData]) {
@@ -731,12 +995,12 @@ export class Encoder {
 		}
 	}
 
-	async unannounce(a: Unannounce) {
+	async publish_namespace_done(a: PublishNamespaceDone) {
 		const buffer = new Uint8Array(8)
 
 		const msgData = this.w.concatBuffer([this.w.encodeTuple(buffer, a.namespace)])
 
-		const messageType = this.w.setVint53(buffer, Id.Unannounce)
+		const messageType = this.w.setVint53(buffer, Id.PublishNamespaceDone)
 		const messageLength = this.w.setVint53(buffer, msgData.length)
 
 		for (const elem of [messageType, messageLength, msgData]) {
@@ -744,27 +1008,15 @@ export class Encoder {
 		}
 	}
 
+	private encodeFilterType(buffer: Uint8Array, ft: FilterType): Uint8Array {
+		return this.w.setVint62(buffer, BigInt(ft))
+	}
+
 	private encodeLocation(buffer: Uint8Array, l: Location): Uint8Array {
-		switch (l.mode) {
-			case "latest_group":
-				return this.w.setVint62(buffer, 1n)
-			case "latest_object":
-				return this.w.setVint62(buffer, 2n)
-			case "absolute_start":
-				return this.w.concatBuffer([
-					this.w.setVint62(buffer, 3n),
-					this.w.setVint53(buffer, l.start_group),
-					this.w.setVint53(buffer, l.start_object),
-				])
-			case "absolute_range":
-				return this.w.concatBuffer([
-					this.w.setVint62(buffer, 3n),
-					this.w.setVint53(buffer, l.start_group),
-					this.w.setVint53(buffer, l.start_object),
-					this.w.setVint53(buffer, l.end_group),
-					this.w.setVint53(buffer, l.end_object),
-				])
-		}
+		return this.w.concatBuffer([
+			this.w.setVint62(buffer, l.group),
+			this.w.setVint62(buffer, l.object),
+		])
 	}
 
 	private encodeParameters(buffer: Uint8Array, p: Parameters | undefined): Uint8Array {

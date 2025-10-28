@@ -12,13 +12,14 @@ export enum Version {
 	DRAFT_05 = 0xff000005,
 	DRAFT_06 = 0xff000006,
 	DRAFT_07 = 0xff000007,
+	DRAFT_14 = 0xff00000e,
 	KIXEL_00 = 0xbad00,
 	KIXEL_01 = 0xbad01,
 }
 
 enum SetupType {
-	Client = 0x40,
-	Server = 0x41,
+	Client = 0x20,
+	Server = 0x21,
 }
 
 // NOTE: These are forked from moq-transport-00.

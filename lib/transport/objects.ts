@@ -27,7 +27,7 @@ export interface TrackHeader {
 export interface TrackChunk {
 	group: number // The group sequence, as a number because 2^53 is enough.
 	object: number
-	status?: Status // Only sent if Object Payload Length is zero
+	priority: number
 	payload: Uint8Array | Status
 }
 
@@ -130,7 +130,7 @@ export class TrackWriter {
 	constructor(
 		public header: TrackHeader,
 		public stream: Writer,
-	) {}
+	) { }
 
 	async write(c: TrackChunk) {
 		await this.stream.u53(c.group)
@@ -155,7 +155,7 @@ export class SubgroupWriter {
 	constructor(
 		public header: SubgroupHeader,
 		public stream: Writer,
-	) {}
+	) { }
 
 	async write(c: SubgroupChunk) {
 		await this.stream.u53(c.object)
@@ -177,7 +177,7 @@ export class TrackReader {
 	constructor(
 		public header: TrackHeader,
 		public stream: Reader,
-	) {}
+	) { }
 
 	async read(): Promise<TrackChunk | undefined> {
 		if (await this.stream.done()) {
@@ -211,7 +211,7 @@ export class SubgroupReader {
 	constructor(
 		public header: SubgroupHeader,
 		public stream: Reader,
-	) {}
+	) { }
 
 	async read(): Promise<SubgroupChunk | undefined> {
 		if (await this.stream.done()) {
