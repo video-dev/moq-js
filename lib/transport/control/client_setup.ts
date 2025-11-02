@@ -4,7 +4,7 @@ import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 
 export interface ClientSetup {
     versions: Version[]
-    params?: Parameters
+    params: Parameters
 }
 
 export namespace ClientSetup {
@@ -16,9 +16,7 @@ export namespace ClientSetup {
         v.versions.forEach((version) => {
             payloadBuf.putVarInt(version)
         })
-        if (v.params) {
-            payloadBuf.putBytes(KeyValuePairs.serialize(v.params))
-        }
+        payloadBuf.putBytes(Parameters.serialize(v.params))
         mainBuf.putU16(payloadBuf.length)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
@@ -30,16 +28,10 @@ export namespace ClientSetup {
         for (let i = 0; i < supportedVersionLen; i++) {
             versions.push(reader.getNumberVarInt() as Version)
         }
-        const paramLen = reader.getNumberVarInt()
-        if (paramLen == 0) {
-            return {
-                versions,
-                params: undefined
-            }
-        }
+        const params = Parameters.deserialize(reader)
         return {
             versions,
-            params: KeyValuePairs.deserialize(reader)
+            params
         }
     }
 }

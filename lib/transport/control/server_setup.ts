@@ -1,10 +1,10 @@
 import { ControlMessageType, Version } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, KeyValuePairs } from "../data_structure"
+import { Parameters } from "../data_structure"
 
 export interface ServerSetup {
     version: Version
-    params?: Parameters
+    params: Parameters
 }
 
 export namespace ServerSetup {
@@ -13,27 +13,17 @@ export namespace ServerSetup {
         mainBuf.putVarInt(ControlMessageType.ServerSetup)
         const payloadBuf = new MutableBytesBuffer(new Uint8Array())
         payloadBuf.putVarInt(v.version)
-        if (v.params) {
-            payloadBuf.putBytes(KeyValuePairs.serialize(v.params))
-        }
+        payloadBuf.putBytes(Parameters.serialize(v.params))
         mainBuf.putU16(payloadBuf.length)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }
 
-    export function deserialize(r: Uint8Array): ServerSetup {
-        const reader = new ImmutableBytesBuffer(r)
+    export function deserialize(reader: ImmutableBytesBuffer): ServerSetup {
         const version = reader.getNumberVarInt() as Version
-        const paramLen = reader.getNumberVarInt()
-        if (paramLen == 0) {
-            return {
-                version,
-                params: undefined
-            }
-        }
         return {
             version,
-            params: KeyValuePairs.deserialize(reader)
+            params: Parameters.deserialize(reader)
         }
     }
 }

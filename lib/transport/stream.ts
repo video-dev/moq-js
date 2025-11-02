@@ -1,25 +1,25 @@
-const MAX_U6 = Math.pow(2, 6) - 1
-const MAX_U14 = Math.pow(2, 14) - 1
-const MAX_U30 = Math.pow(2, 30) - 1
-const MAX_U31 = Math.pow(2, 31) - 1
+const MAX_U6 = Math.pow(2, 6) - 1 // 0-63 (6 bits)
+const MAX_U14 = Math.pow(2, 14) - 1 // 0-16383 (14 bits)
+const MAX_U30 = Math.pow(2, 30) - 1 // 0-1073741823 (30 bits)
+const MAX_U31 = Math.pow(2, 31) - 1 // 0-2147483647 (31 bits)
 const MAX_U53 = Number.MAX_SAFE_INTEGER
-const MAX_U62: bigint = 2n ** 62n - 1n
+const MAX_U62: bigint = 2n ** 62n - 1n // 0-4611686018427387903 (62 bits)
 
 // Reader wraps a stream and provides convience methods for reading pieces from a stream
 // Unfortunately we can't use a BYOB reader because it's not supported with WebTransport+WebWorkers yet.
 export class Reader {
-	#buffer: Uint8Array
+	buffer: Uint8Array
 	#stream: ReadableStream<Uint8Array>
 	#reader: ReadableStreamDefaultReader<Uint8Array>
 
 	constructor(buffer: Uint8Array, stream: ReadableStream<Uint8Array>) {
-		this.#buffer = buffer
+		this.buffer = buffer
 		this.#stream = stream
 		this.#reader = this.#stream.getReader()
 	}
 
 	getByteLength(): number {
-		return this.#buffer.byteLength
+		return this.buffer.byteLength
 	}
 
 	// Adds more data to the buffer, returning true if more data was added.
@@ -31,13 +31,13 @@ export class Reader {
 
 		const buffer = new Uint8Array(result.value)
 
-		if (this.#buffer.byteLength == 0) {
-			this.#buffer = buffer
+		if (this.buffer.byteLength == 0) {
+			this.buffer = buffer
 		} else {
-			const temp = new Uint8Array(this.#buffer.byteLength + buffer.byteLength)
-			temp.set(this.#buffer)
-			temp.set(buffer, this.#buffer.byteLength)
-			this.#buffer = temp
+			const temp = new Uint8Array(this.buffer.byteLength + buffer.byteLength)
+			temp.set(this.buffer)
+			temp.set(buffer, this.buffer.byteLength)
+			this.buffer = temp
 		}
 
 		return true
@@ -45,7 +45,7 @@ export class Reader {
 
 	// Add more data to the buffer until it's at least size bytes.
 	async #fillTo(size: number) {
-		while (this.#buffer.byteLength < size) {
+		while (this.buffer.byteLength < size) {
 			if (!(await this.#fill())) {
 				throw new Error("unexpected end of stream")
 			}
@@ -54,8 +54,8 @@ export class Reader {
 
 	// Consumes the first size bytes of the buffer.
 	#slice(size: number): Uint8Array {
-		const result = new Uint8Array(this.#buffer.buffer, this.#buffer.byteOffset, size)
-		this.#buffer = new Uint8Array(this.#buffer.buffer, this.#buffer.byteOffset + size)
+		const result = new Uint8Array(this.buffer.buffer, this.buffer.byteOffset, size)
+		this.buffer = new Uint8Array(this.buffer.buffer, this.buffer.byteOffset + size)
 
 		return result
 	}
@@ -69,8 +69,8 @@ export class Reader {
 
 	async readAll(): Promise<Uint8Array> {
 		// eslint-disable-next-line no-empty
-		while (await this.#fill()) {}
-		return this.#slice(this.#buffer.byteLength)
+		while (await this.#fill()) { }
+		return this.#slice(this.buffer.byteLength)
 	}
 
 	async tuple(): Promise<string[]> {
@@ -99,6 +99,14 @@ export class Reader {
 		return this.#slice(1)[0]
 	}
 
+	async u16(): Promise<number> {
+		await this.#fillTo(2)
+		const slice = this.#slice(2)
+		const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
+
+		return view.getUint16(0)
+	}
+
 	// Returns a Number using 53-bits, the max Javascript can use for integer math
 	async u53(): Promise<number> {
 		const v = await this.u62()
@@ -112,7 +120,7 @@ export class Reader {
 	// NOTE: Returns a bigint instead of a number since it may be larger than 53-bits
 	async u62(): Promise<bigint> {
 		await this.#fillTo(1)
-		const size = (this.#buffer[0] & 0xc0) >> 6
+		const size = (this.buffer[0] & 0xc0) >> 6
 
 		if (size == 0) {
 			const first = this.#slice(1)[0]
@@ -141,7 +149,7 @@ export class Reader {
 	}
 
 	async done(): Promise<boolean> {
-		if (this.#buffer.byteLength > 0) return false
+		if (this.buffer.byteLength > 0) return false
 		return !(await this.#fill())
 	}
 
@@ -152,7 +160,7 @@ export class Reader {
 
 	release(): [Uint8Array, ReadableStream<Uint8Array>] {
 		this.#reader.releaseLock()
-		return [this.#buffer, this.#stream]
+		return [this.buffer, this.#stream]
 	}
 }
 
@@ -189,7 +197,7 @@ export class Writer {
 			throw new Error(`overflow, value larger than 53-bits: ${v}`)
 		}
 
-		await this.write(this.setVint53(this.#scratch, v))
+		await this.write(this.setVarInt(this.#scratch, v))
 	}
 
 	async u62(v: bigint) {
@@ -199,7 +207,7 @@ export class Writer {
 			throw new Error(`overflow, value larger than 62-bits: ${v}`)
 		}
 
-		await this.write(this.setVint62(this.#scratch, v))
+		await this.write(this.setVarInt(this.#scratch, v))
 	}
 
 	setUint8(dst: Uint8Array, v: number): Uint8Array {
@@ -228,26 +236,18 @@ export class Writer {
 		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
 	}
 
-	setVint53(dst: Uint8Array, v: number): Uint8Array {
-		if (v <= MAX_U6) {
-			return this.setUint8(dst, v)
-		} else if (v <= MAX_U14) {
-			return this.setUint16(dst, v | 0x4000)
-		} else if (v <= MAX_U30) {
-			return this.setUint32(dst, v | 0x80000000)
-		} else if (v <= MAX_U53) {
-			return this.setUint64(dst, BigInt(v) | 0xc000000000000000n)
-		} else {
-			throw new Error(`overflow, value larger than 53-bits: ${v}`)
-		}
-	}
+	setVarInt(dst: Uint8Array, v: bigint | number): Uint8Array {
+		const value = typeof v === "number" ? BigInt(v) : v
 
-	setVint62(dst: Uint8Array, v: bigint): Uint8Array {
-		if (v < MAX_U6) {
-			return this.setUint8(dst, Number(v))
-		} else if (v < MAX_U14) {
-			return this.setUint16(dst, Number(v) | 0x4000)
-		} else if (v <= MAX_U30) {
+		if (value < 0) {
+			throw new Error(`underflow, value is negative: ${v}`)
+		}
+
+		if (value < MAX_U6) {
+			return this.setUint8(dst, Number(value))
+		} else if (value < MAX_U14) {
+			return this.setUint16(dst, Number(value) | 0x4000)
+		} else if (value <= MAX_U30) {
 			return this.setUint32(dst, Number(v) | 0x80000000)
 		} else if (v <= MAX_U62) {
 			return this.setUint64(dst, BigInt(v) | 0xc000000000000000n)
@@ -283,8 +283,8 @@ export class Writer {
 		const tupleBytes = new TextEncoder().encode(tuple.join("/"))
 
 		return this.concatBuffer([
-			this.setVint53(buffer, tuple.length),
-			this.setVint53(buffer, tupleBytes.length),
+			this.setVarInt(buffer, tuple.length),
+			this.setVarInt(buffer, tupleBytes.length),
 			tupleBytes,
 		])
 	}
@@ -292,7 +292,7 @@ export class Writer {
 	encodeString(buffer: Uint8Array, str: string): Uint8Array {
 		const strBytes = new TextEncoder().encode(str)
 
-		return this.concatBuffer([this.setVint53(buffer, strBytes.length), strBytes])
+		return this.concatBuffer([this.setVarInt(buffer, strBytes.length), strBytes])
 	}
 
 	async write(v: Uint8Array) {
