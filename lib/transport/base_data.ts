@@ -1,4 +1,4 @@
-import { ImmutableBytesBuffer, MutableBytesBuffer } from "./buffer"
+import { ImmutableBytesBuffer, MutableBytesBuffer, Reader } from "./buffer"
 
 export type Tuple<T = any> = TupleField<T>[]
 export type TupleField<T = any> = T // can be any type
@@ -90,12 +90,28 @@ export namespace KeyValuePairs {
         return buf.Uint8Array
     }
 
-    export function deserialize(buffer: ImmutableBytesBuffer): Parameters {
-        const pairs = new Map<bigint, Uint8Array | bigint>()
+    export function deserialize(buffer: ImmutableBytesBuffer): KeyValuePairs {
         const size = buffer.getNumberVarInt()
+        return deserialize_with_size(buffer, size)
+    }
+
+    export function deserialize_with_size(buffer: ImmutableBytesBuffer, size: number): KeyValuePairs {
+        const pairs = new Map<bigint, Uint8Array | bigint>()
         for (let i = 0; i < size; i++) {
             const key = buffer.getVarInt()
             const value = valueIsVarInt(key) ? buffer.getVarInt() : buffer.getVarBytes()
+            pairs.set(key, value)
+        }
+
+        return pairs
+    }
+
+    export async function deserialize_with_reader(reader: Reader): Promise<KeyValuePairs> {
+        const size = await reader.getNumberVarInt()
+        const pairs = new Map<bigint, Uint8Array | bigint>()
+        for (let i = 0; i < size; i++) {
+            const key = await reader.getVarInt()
+            const value = valueIsVarInt(key) ? await reader.getVarInt() : await reader.getVarBytes()
             pairs.set(key, value)
         }
 
@@ -115,5 +131,13 @@ export namespace Parameters {
 
     export function deserialize(buffer: ImmutableBytesBuffer): Parameters {
         return KeyValuePairs.deserialize(buffer)
+    }
+
+    export function deserialize_with_size(buffer: ImmutableBytesBuffer, size: number): Parameters {
+        return KeyValuePairs.deserialize_with_size(buffer, size)
+    }
+
+    export async function deserialize_with_reader(reader: Reader): Promise<Parameters> {
+        return KeyValuePairs.deserialize_with_reader(reader)
     }
 }

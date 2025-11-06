@@ -149,7 +149,7 @@ export class Broadcast {
 		await subscriber.ack()
 
 		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
-		await stream.write({ object: 0, payload: bytes })
+		await stream.write({ object_id: 0, object_payload: bytes })
 		await stream.close()
 	}
 
@@ -163,7 +163,7 @@ export class Broadcast {
 		const init = await track.init()
 
 		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
-		await stream.write({ object: 0, payload: init })
+		await stream.write({ object_id: 0, object_payload: init })
 		await stream.close()
 	}
 
@@ -205,8 +205,8 @@ export class Broadcast {
 			if (done) break
 
 			await stream.write({
-				object,
-				payload: value,
+				object_id: object,
+				object_payload: value,
 			})
 
 			object += 1

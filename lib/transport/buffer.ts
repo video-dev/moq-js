@@ -6,22 +6,42 @@ const MAX_U30 = Math.pow(2, 30) - 1 // 0-1073741823 (30 bits)
 const MAX_U53 = Number.MAX_SAFE_INTEGER
 const MAX_U62: bigint = 2n ** 62n - 1n // 0-4611686018427387903 (62 bits)
 
-import { debug } from "./utils";
+export interface Reader {
+    byteLength: number
+    read(len: number): Promise<Uint8Array>
+    done(): Promise<boolean>
+    close(): Promise<void>
+    release(): [Uint8Array, ReadableStream<Uint8Array>] | [Uint8Array, WritableStream<Uint8Array>]
 
+    getU8(): Promise<number>
+    getU16(): Promise<number>
+    getNumberVarInt(): Promise<number>
+    getVarInt(): Promise<bigint>
+    getVarBytes(): Promise<Uint8Array>
+    getUtf8String(): Promise<string>
+}
 
+export interface Writer {
+    write(data: Uint8Array): Promise<void>
+    flush(): Promise<void>
+    clear(): void
+    close(): Promise<void>
+    release(): [Uint8Array, WritableStream<Uint8Array>] | [Uint8Array, ReadableStream<Uint8Array>]
 
-class BytesBuffer {
-    buffer: Uint8Array
+    putU8(v: number): void
+    putU16(v: number): void
+    putVarInt(v: number | bigint): void
+    putUtf8String(v: string): void
+}
+
+export class ImmutableBytesBuffer {
+    protected buffer: Uint8Array
+    protected offset = 0
     view: DataView
-    offset = 0
 
     constructor(buffer: Uint8Array) {
         this.buffer = buffer
         this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length)
-    }
-
-    getOffset(): number {
-        return this.offset
     }
 
     get length(): number {
@@ -34,6 +54,14 @@ class BytesBuffer {
 
     get Uint8Array(): Uint8Array {
         return this.buffer.slice(0, this.offset)
+    }
+
+    get firstByteValue(): number {
+        return this.buffer[this.offset]
+    }
+
+    getRemainingBuffer(): Uint8Array {
+        return this.buffer.subarray(this.offset)
     }
 
     getU8(): number {
@@ -121,9 +149,25 @@ class BytesBuffer {
     }
 }
 
-export class MutableBytesBuffer extends BytesBuffer {
+export class MutableBytesBuffer {
+    offset = 0
+    buffer: Uint8Array
+    view: DataView
     constructor(buffer: Uint8Array) {
-        super(buffer)
+        this.buffer = buffer
+        this.view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+    }
+
+    get length(): number {
+        return this.buffer.length
+    }
+
+    get byteLength(): number {
+        return this.buffer.byteLength
+    }
+
+    get Uint8Array(): Uint8Array {
+        return this.buffer.subarray(0, this.offset)
     }
 
     enoughSpaceAvailable(len: number): void {
@@ -131,7 +175,6 @@ export class MutableBytesBuffer extends BytesBuffer {
         if (required < this.buffer.length) {
             return
         }
-
 
         const newBuffer = new Uint8Array(nextPow2(required))
         newBuffer.set(this.buffer.subarray(0, this.offset))
@@ -220,13 +263,291 @@ export class MutableBytesBuffer extends BytesBuffer {
 
 }
 
-export class ImmutableBytesBuffer extends BytesBuffer {
-    constructor(buffer: Uint8Array) {
-        super(buffer)
+export class ReadableStreamBuffer implements Reader {
+    protected buffer: Uint8Array
+    protected reader: ReadableStreamDefaultReader<Uint8Array>
+    protected readableStream: ReadableStream<Uint8Array>
+
+    constructor(reader: ReadableStream, buffer?: Uint8Array) {
+        this.buffer = buffer ?? new Uint8Array()
+        this.reader = reader.getReader()
+        this.readableStream = reader
     }
 
-    get length(): number {
-        return this.buffer.length
+    get byteLength(): number {
+        return this.buffer.byteLength
+    }
+
+    // Adds more data to the buffer, returning true if more data was added.
+    async #fill(): Promise<boolean> {
+        const result = await this.reader.read()
+        if (result.done) {
+            return false
+        }
+        const buffer = new Uint8Array(result.value)
+
+        if (this.buffer.byteLength == 0) {
+            this.buffer = buffer
+        } else {
+            const temp = new Uint8Array(this.buffer.byteLength + buffer.byteLength)
+            temp.set(this.buffer)
+            temp.set(buffer, this.buffer.byteLength)
+            this.buffer = temp
+        }
+
+        return true
+    }
+
+    // Add more data to the buffer until it's at least size bytes.
+    async #fillTo(size: number) {
+        while (this.buffer.byteLength < size) {
+            if (!(await this.#fill())) {
+                throw new Error("unexpected end of stream")
+            }
+        }
+    }
+
+    // Consumes the first size bytes of the buffer.
+    #slice(size: number): Uint8Array {
+        const result = new Uint8Array(this.buffer.buffer, this.buffer.byteOffset, size)
+        this.buffer = new Uint8Array(this.buffer.buffer, this.buffer.byteOffset + size)
+
+        return result
+    }
+
+    async read(size: number): Promise<Uint8Array> {
+        if (size == 0) return new Uint8Array()
+
+        await this.#fillTo(size)
+        return this.#slice(size)
+    }
+
+    async readAll(): Promise<Uint8Array> {
+        // eslint-disable-next-line no-empty
+        while (await this.#fill()) { }
+        return this.#slice(this.buffer.byteLength)
+    }
+
+    async getUtf8String(maxLength?: number): Promise<string> {
+        const length = await this.getNumberVarInt()
+        if (maxLength !== undefined && length > maxLength) {
+            throw new Error(`string length ${length} exceeds max length ${maxLength}`)
+        }
+
+        const buffer = await this.read(length)
+        return new TextDecoder().decode(buffer)
+    }
+
+    async getU8(): Promise<number> {
+        await this.#fillTo(1)
+        return this.#slice(1)[0]
+    }
+
+    async getU16(): Promise<number> {
+        await this.#fillTo(2)
+        const slice = this.#slice(2)
+        const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
+
+        return view.getInt16(0)
+    }
+
+    // Returns a Number using 53-bits, the max Javascript can use for integer math
+    async getNumberVarInt(): Promise<number> {
+        const v = await this.getVarInt()
+        if (v > MAX_U53) {
+            throw new Error("value larger than 53-bits; use v62 instead")
+        }
+
+        return Number(v)
+    }
+
+    async getVarInt(): Promise<bigint> {
+        await this.#fillTo(1)
+        const size = (this.buffer[0] & 0xc0) >> 6
+
+        if (size == 0) {
+            const first = this.#slice(1)[0]
+            return BigInt(first) & 0x3fn
+        } else if (size == 1) {
+            await this.#fillTo(2)
+            const slice = this.#slice(2)
+            const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
+
+            return BigInt(view.getInt16(0)) & 0x3fffn
+        } else if (size == 2) {
+            await this.#fillTo(4)
+            const slice = this.#slice(4)
+            const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
+
+            return BigInt(view.getUint32(0)) & 0x3fffffffn
+        } else if (size == 3) {
+            await this.#fillTo(8)
+            const slice = this.#slice(8)
+            const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
+
+            return view.getBigUint64(0) & 0x3fffffffffffffffn
+        } else {
+            throw new Error("impossible")
+        }
+    }
+
+    async getVarBytes(): Promise<Uint8Array> {
+        const length = await this.getNumberVarInt()
+        return this.read(length)
+    }
+
+
+    async done(): Promise<boolean> {
+        if (this.buffer.byteLength > 0) return false
+        return !(await this.#fill())
+    }
+
+    async close() {
+        this.reader.releaseLock()
+        await this.readableStream.cancel()
+    }
+
+    release(): [Uint8Array, ReadableStream<Uint8Array>] {
+        this.reader.releaseLock()
+        return [this.buffer, this.readableStream]
+    }
+
+}
+
+export class WritableStreamBuffer implements Writer {
+    protected writer: WritableStreamDefaultWriter<Uint8Array>
+    protected writableStream: WritableStream<Uint8Array>
+    protected buffer: MutableBytesBuffer
+    constructor(writer: WritableStream<Uint8Array>) {
+        this.writer = writer.getWriter()
+        this.writableStream = writer
+        this.buffer = new MutableBytesBuffer(new Uint8Array())
+    }
+
+    async write(data: Uint8Array) {
+        return this.writer.write(data)
+    }
+
+    async close() {
+        this.writer.releaseLock()
+        return this.writableStream.close()
+    }
+
+    async flush() {
+        await this.write(this.buffer.Uint8Array)
+        this.clear()
+    }
+
+    clear() {
+        this.buffer = new MutableBytesBuffer(new Uint8Array())
+    }
+
+    putU8(v: number) {
+        this.buffer.putU8(v)
+    }
+
+    putU16(v: number) {
+        this.buffer.putU16(v)
+    }
+
+    putVarInt(v: number | bigint) {
+        this.buffer.putVarInt(v)
+    }
+
+    putUtf8String(v: string) {
+        this.buffer.putUtf8String(v)
+    }
+
+    release(): [Uint8Array, WritableStream<Uint8Array>] {
+        this.writer.releaseLock()
+        return [this.buffer.Uint8Array, this.writableStream]
+    }
+}
+
+export class ReadableWritableStreamBuffer implements Reader, Writer {
+    private readStreamBuffer: ReadableStreamBuffer
+    private writeStreamBuffer: WritableStreamBuffer
+
+    constructor(reader: ReadableStream, writer: WritableStream<Uint8Array>) {
+        this.readStreamBuffer = new ReadableStreamBuffer(reader)
+        this.writeStreamBuffer = new WritableStreamBuffer(writer)
+    }
+
+    get byteLength(): number {
+        return this.readStreamBuffer.byteLength
+    }
+
+    async read(len: number): Promise<Uint8Array> {
+        return this.readStreamBuffer.read(len)
+    }
+
+
+    async getU8(): Promise<number> {
+        return this.readStreamBuffer.getU8()
+    }
+
+    async getU16(): Promise<number> {
+        return this.readStreamBuffer.getU16()
+    }
+
+    async getNumberVarInt(): Promise<number> {
+        return this.readStreamBuffer.getNumberVarInt()
+    }
+
+    async getVarInt(): Promise<bigint> {
+        return this.readStreamBuffer.getVarInt()
+    }
+
+    async getUtf8String(): Promise<string> {
+        return this.readStreamBuffer.getUtf8String()
+    }
+
+    async getVarBytes(): Promise<Uint8Array> {
+        return this.readStreamBuffer.getVarBytes()
+    }
+
+    async done(): Promise<boolean> {
+        return this.readStreamBuffer.done()
+    }
+
+    putU16(v: number): void {
+        this.writeStreamBuffer.putU16(v)
+    }
+    putVarInt(v: number | bigint): void {
+        this.writeStreamBuffer.putVarInt(v)
+    }
+    putUtf8String(v: string): void {
+        this.writeStreamBuffer.putUtf8String(v)
+    }
+    putU8(v: number) {
+        this.writeStreamBuffer.putU8(v)
+    }
+
+    async write(data: Uint8Array) {
+        return this.writeStreamBuffer.write(data)
+    }
+
+    async close() {
+        this.readStreamBuffer.close()
+        this.writeStreamBuffer.close()
+    }
+    async flush(): Promise<void> {
+        return this.writeStreamBuffer.flush()
+    }
+
+    clear(): void {
+        this.writeStreamBuffer.clear()
+    }
+
+
+    release(): [Uint8Array, ReadableStream<Uint8Array>] | [Uint8Array, WritableStream<Uint8Array>] {
+        throw new Error("use release all instead of release")
+    }
+
+    releaseAll(): [Uint8Array, Uint8Array, ReadableStream<Uint8Array>, WritableStream<Uint8Array>] {
+        const [readBuffer, readStream] = this.readStreamBuffer.release()
+        const [writeBuffer, writeStream] = this.writeStreamBuffer.release()
+        return [readBuffer, writeBuffer, readStream, writeStream]
     }
 }
 

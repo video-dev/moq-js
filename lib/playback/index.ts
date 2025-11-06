@@ -7,7 +7,7 @@ import { asError } from "../common/error"
 import Backend from "./backend"
 
 import { Client } from "../transport/client"
-import { SubgroupReader } from "../transport/objects"
+import { SubgroupReader } from "../transport/subgroup"
 
 export type Range = Message.Range
 export type Timeline = Message.Timeline
@@ -73,7 +73,7 @@ export default class Player extends EventTarget {
 	}
 
 	static async create(config: PlayerConfig, tracknum: number): Promise<Player> {
-		const client = new Client({ url: config.url, fingerprint: config.fingerprint, role: "subscriber" })
+		const client = new Client({ url: config.url, fingerprint: config.fingerprint })
 		const connection = await client.connect()
 
 		const catalog = await Catalog.fetch(connection, [config.namespace])
@@ -81,7 +81,7 @@ export default class Player extends EventTarget {
 
 		const canvas = config.canvas.transferControlToOffscreen()
 
-		return new Player(connection, catalog, tracknum, canvas)
+		return new Player(connection, catalog as any, tracknum, canvas)
 	}
 
 	async #run() {
@@ -110,17 +110,20 @@ export default class Player extends EventTarget {
 	}
 
 	async #runInit(namespace: string, name: string) {
+		console.log("running #runInit", namespace, name)
 		const sub = await this.#connection.subscribe([namespace], name)
 		try {
+			console.log("waiting for init data")
 			const init = await Promise.race([sub.data(), this.#running])
 			if (!init) throw new Error("no init data")
 
+			console.log("got init data")
 			// We don't care what type of reader we get, we just want the payload.
 			const chunk = await init.read()
 			if (!chunk) throw new Error("no init chunk")
-			if (!(chunk.payload instanceof Uint8Array)) throw new Error("invalid init chunk")
+			if (!(chunk.object_payload instanceof Uint8Array)) throw new Error("invalid init chunk")
 
-			this.#backend.init({ data: chunk.payload, name })
+			this.#backend.init({ data: chunk.object_payload, name })
 		} finally {
 			await sub.close()
 		}
@@ -147,7 +150,9 @@ export default class Player extends EventTarget {
 		const sub = await this.#connection.subscribe(track.namespace, track.name)
 
 		try {
-			for (;;) {
+			console.log("starting segment data loop")
+			for (; ;) {
+				console.log("waiting for segment data")
 				const segment = await Promise.race([sub.data(), this.#running])
 				if (!segment) continue
 
@@ -168,7 +173,7 @@ export default class Player extends EventTarget {
 					eventOfFirstSegmentSent = true
 				}
 
-				const [buffer, stream] = segment.stream.release()
+				const [buffer, stream] = segment.stream.release() as [Uint8Array, ReadableStream<Uint8Array>]
 
 				this.#backend.segment({
 					init: track.initTrack,

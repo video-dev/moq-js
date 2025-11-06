@@ -1,10 +1,12 @@
 import * as Control from "./control"
+import { ControlStream } from "./stream"
 import { Queue, Watch } from "../common/async"
-import { Objects, SubgroupWriter, StreamType, TrackWriter } from "./objects"
+import { Objects, TrackWriter, ObjectDatagramType } from "./objects"
+import { SubgroupType, SubgroupWriter } from "./subgroup"
 
 export class Publisher {
 	// Used to send control messages
-	#control: Control.Stream
+	#control: ControlStream
 
 	// Use to send objects.
 	#objects: Objects
@@ -19,7 +21,7 @@ export class Publisher {
 	// Track alias counter (publisher assigns these in draft-14)
 	#nextTrackAlias = 0n
 
-	constructor(control: Control.Stream, objects: Objects) {
+	constructor(control: ControlStream, objects: Objects) {
 		this.#control = control
 		this.#objects = objects
 	}
@@ -33,8 +35,10 @@ export class Publisher {
 		this.#publishedNamespaces.set(namespace.join("/"), publishNamespaceSend)
 
 		await this.#control.send({
-			kind: Control.Msg.PublishNamespace,
-			namespace,
+			type: Control.ControlMessageType.PublishNamespace,
+			message: {
+				namespace,
+			},
 		})
 
 		return publishNamespaceSend
@@ -45,17 +49,23 @@ export class Publisher {
 		return await this.#subscribeQueue.next()
 	}
 
-	async recv(msg: Control.Subscriber) {
-		if (msg.kind == Control.Msg.Subscribe) {
-			await this.recvSubscribe(msg)
-		} else if (msg.kind == Control.Msg.Unsubscribe) {
-			this.recvUnsubscribe(msg)
-		} else if (msg.kind == Control.Msg.PublishNamespaceOk) {
-			this.recvPublishNamespaceOk(msg)
-		} else if (msg.kind == Control.Msg.PublishNamespaceError) {
-			this.recvPublishNamespaceError(msg)
-		} else {
-			throw new Error(`unknown control message`) // impossible
+	async recv(msg: Control.MessageWithType) {
+		const { type, message } = msg;
+		switch (type) {
+			case Control.ControlMessageType.Subscribe:
+				await this.recvSubscribe(message)
+				break;
+			case Control.ControlMessageType.Unsubscribe:
+				this.recvUnsubscribe(message)
+				break;
+			case Control.ControlMessageType.PublishNamespaceOk:
+				this.recvPublishNamespaceOk(message)
+				break;
+			case Control.ControlMessageType.PublishNamespaceError:
+				this.recvPublishNamespaceError(message)
+				break;
+			default:
+				throw new Error(`unknown control message`) // impossible
 		}
 	}
 
@@ -91,12 +101,15 @@ export class Publisher {
 
 		// NOTE(itzmanish): revisit this
 		await this.#control.send({
-			kind: Control.Msg.SubscribeOk,
-			id: msg.id,
-			expires: 0n,
-			content_exists: 0,
-			group_order: msg.group_order,
-			track_alias: trackAlias,
+			type: Control.ControlMessageType.SubscribeOk,
+			message: {
+				id: msg.id,
+				expires: 0n,
+				content_exists: 0,
+				group_order: msg.group_order,
+				track_alias: trackAlias,
+				params: new Map(),
+			}
 		})
 	}
 
@@ -106,14 +119,14 @@ export class Publisher {
 }
 
 export class PublishNamespaceSend {
-	#control: Control.Stream
+	#control: ControlStream
 
 	readonly namespace: string[]
 
 	// The current state, updated by control messages.
 	#state = new Watch<"init" | "ack" | Error>("init")
 
-	constructor(control: Control.Stream, namespace: string[]) {
+	constructor(control: ControlStream, namespace: string[]) {
 		this.#control = control
 		this.namespace = namespace
 	}
@@ -163,7 +176,7 @@ export class PublishNamespaceSend {
 }
 
 export class SubscribeRecv {
-	#control: Control.Stream
+	#control: ControlStream
 	#objects: Objects
 	#id: bigint
 	#trackAlias: bigint // Publisher-specified in draft-14
@@ -176,7 +189,7 @@ export class SubscribeRecv {
 	// The current state of the subscription.
 	#state: "init" | "ack" | "closed" = "init"
 
-	constructor(control: Control.Stream, objects: Objects, msg: Control.Subscribe, trackAlias: bigint) {
+	constructor(control: ControlStream, objects: Objects, msg: Control.Subscribe, trackAlias: bigint) {
 		this.#control = control // so we can send messages
 		this.#objects = objects // so we can send objects
 		this.#id = msg.id
@@ -195,12 +208,15 @@ export class SubscribeRecv {
 		// NOTE(itzmanish): revisit this
 		// Send the control message.
 		return this.#control.send({
-			kind: Control.Msg.SubscribeOk,
-			id: this.#id,
-			expires: 0n,
-			group_order: this.groupOrder,
-			track_alias: this.#trackAlias,
-			content_exists: 0,
+			type: Control.ControlMessageType.SubscribeOk,
+			message: {
+				id: this.#id,
+				expires: 0n,
+				group_order: this.groupOrder,
+				track_alias: this.#trackAlias,
+				content_exists: 0,
+				params: new Map(),
+			}
 		})
 	}
 
@@ -210,30 +226,30 @@ export class SubscribeRecv {
 		this.#state = "closed"
 
 		return this.#control.send({
-			kind: Control.Msg.Unsubscribe,
-			id: this.#id,
+			type: Control.ControlMessageType.Unsubscribe,
+			message: { id: this.#id }
 		})
 	}
 
-	// Create a writable data stream for the entire track
+	// Create a writable data stream for the entire track (using datagrams)
 	async serve(props?: { priority: number }): Promise<TrackWriter> {
 		return this.#objects.send({
-			type: StreamType.Track,
-			sub: this.#id,
-			track: this.#trackAlias,
+			type: ObjectDatagramType.Type0x0, // Basic datagram without extensions
+			track_alias: this.#trackAlias,
+			group_id: 0, // Will be set per write
+			object_id: 0, // Will be set per write
 			publisher_priority: props?.priority ?? 127,
-		})
+		}) as Promise<TrackWriter>
 	}
 
 	// Create a writable data stream for a subgroup within the track
 	async subgroup(props: { group: number; subgroup: number; priority?: number }): Promise<SubgroupWriter> {
 		return this.#objects.send({
-			type: StreamType.Subgroup,
-			sub: this.#id,
-			track: this.#trackAlias,
-			group: props.group,
-			subgroup: props.subgroup,
+			type: SubgroupType.Type0x10, // Basic subgroup without extensions
+			track_alias: this.#trackAlias,
+			group_id: props.group,
+			subgroup_id: props.subgroup,
 			publisher_priority: props.priority ?? 127,
-		})
+		}) as Promise<SubgroupWriter>
 	}
 }
