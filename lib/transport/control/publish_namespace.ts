@@ -1,6 +1,6 @@
 import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, Tuple } from "../data_structure"
+import { Parameters, Tuple } from "../base_data"
 
 
 export interface PublishNamespace {

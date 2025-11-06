@@ -1,6 +1,6 @@
 import { ControlMessageType, GroupOrder } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, Location, Tuple } from "../data_structure"
+import { Parameters, Location, Tuple } from "../base_data"
 
 export interface Publish {
     id: bigint

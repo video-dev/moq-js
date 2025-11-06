@@ -1,6 +1,6 @@
 import { ControlMessageType, GroupOrder } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, Location } from "../data_structure"
+import { Parameters, Location } from "../base_data"
 
 export interface FetchOk {
     id: bigint

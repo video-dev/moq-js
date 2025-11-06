@@ -1,5 +1,5 @@
 import { ControlMessageType, Version } from "."
-import { KeyValuePairs, Parameters } from "../data_structure"
+import { KeyValuePairs, Parameters } from "../base_data"
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 
 export interface ClientSetup {

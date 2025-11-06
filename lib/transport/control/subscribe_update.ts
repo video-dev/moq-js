@@ -1,6 +1,6 @@
 import { ControlMessageType, GroupOrder } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters, KeyValuePairs, Location } from "../data_structure"
+import { Parameters, KeyValuePairs, Location } from "../base_data"
 
 export interface SubscribeUpdate {
     id: bigint

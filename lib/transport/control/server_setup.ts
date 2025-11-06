@@ -1,6 +1,6 @@
 import { ControlMessageType, Version } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Parameters } from "../data_structure"
+import { Parameters } from "../base_data"
 
 export interface ServerSetup {
     version: Version

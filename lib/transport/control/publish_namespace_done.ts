@@ -1,6 +1,6 @@
 import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Tuple } from "../data_structure"
+import { Tuple } from "../base_data"
 
 export interface PublishNamespaceDone {
     namespace: Tuple<string>

@@ -1,6 +1,6 @@
 import { ControlMessageType, FilterType, GroupOrder } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Location, Parameters } from "../data_structure"
+import { Location, Parameters } from "../base_data"
 
 
 

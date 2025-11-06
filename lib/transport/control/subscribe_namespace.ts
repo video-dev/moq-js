@@ -1,6 +1,6 @@
 import { ControlMessageType, FilterType, GroupOrder } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Tuple, Parameters, Location, KeyValuePairs } from "../data_structure"
+import { Tuple, Parameters, Location, KeyValuePairs } from "../base_data"
 
 
 export interface SubscribeNamespace {

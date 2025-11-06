@@ -1,6 +1,6 @@
 import { ControlMessageType } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Tuple, Parameters, Location, KeyValuePairs } from "../data_structure"
+import { Tuple, Parameters, Location, KeyValuePairs } from "../base_data"
 import { debug } from "../utils"
 
 export enum GroupOrder {

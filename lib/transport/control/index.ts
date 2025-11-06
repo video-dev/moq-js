@@ -18,7 +18,6 @@ import { Fetch } from "./fetch"
 import { FetchOk } from "./fetch_ok"
 import { FetchError } from "./fetch_error"
 import { FetchCancel } from "./fetch_cancel"
-import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
 import { GoAway } from "./go_away"
 import { ClientSetup } from "./client_setup"
 import { ServerSetup } from "./server_setup"
@@ -97,7 +96,7 @@ function isPublisher(m: ControlMessageType): boolean {
     )
 }
 
-enum ControlMessageType {
+export enum ControlMessageType {
     ReservedSetupV00 = 0x1,
     GoAway = 0x10,
     MaxRequestId = 0x15,
@@ -129,10 +128,39 @@ enum ControlMessageType {
     ServerSetup = 0x21,
 }
 
+export namespace ControlMessageType {
+    export function toString(t: ControlMessageType): string {
+        switch (t) {
+            case ControlMessageType.ReservedSetupV00: return "ReservedSetupV00"
+            case ControlMessageType.GoAway: return "GoAway"
+            case ControlMessageType.MaxRequestId: return "MaxRequestId"
+            case ControlMessageType.RequestsBlocked: return "RequestsBlocked"
+            case ControlMessageType.SubscribeUpdate: return "SubscribeUpdate"
+            case ControlMessageType.Subscribe: return "Subscribe"
+            case ControlMessageType.SubscribeOk: return "SubscribeOk"
+            case ControlMessageType.SubscribeError: return "SubscribeError"
+            case ControlMessageType.Unsubscribe: return "Unsubscribe"
+            case ControlMessageType.PublishDone: return "PublishDone"
+            case ControlMessageType.Publish: return "Publish"
+            case ControlMessageType.PublishOk: return "PublishOk"
+            case ControlMessageType.PublishError: return "PublishError"
+            case ControlMessageType.PublishNamespace: return "PublishNamespace"
+            case ControlMessageType.PublishNamespaceOk: return "PublishNamespaceOk"
+            case ControlMessageType.PublishNamespaceError: return "PublishNamespaceError"
+            case ControlMessageType.PublishNamespaceDone: return "PublishNamespaceDone"
+            case ControlMessageType.SubscribeNamespace: return "SubscribeNamespace"
+            case ControlMessageType.SubscribeNamespaceOk: return "SubscribeNamespaceOk"
+            case ControlMessageType.SubscribeNamespaceError: return "SubscribeNamespaceError"
+            case ControlMessageType.Fetch: return "Fetch"
+            case ControlMessageType.FetchCancel: return "FetchCancel"
+            case ControlMessageType.FetchOk: return "FetchOk"
+            case ControlMessageType.FetchError: return "FetchError"
+            case ControlMessageType.ClientSetup: return "ClientSetup"
+            case ControlMessageType.ServerSetup: return "ServerSetup"
+        }
+    }
+}
 
-
-///  other types
-export * from "../packer"
 
 export {
     Subscribe,
@@ -160,7 +188,6 @@ export {
     ServerSetup,
 
     Version,
-    ControlMessageType,
     isSubscriber,
     isPublisher,
     MessageWithType,

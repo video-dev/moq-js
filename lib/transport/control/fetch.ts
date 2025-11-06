@@ -1,6 +1,6 @@
 import { ControlMessageType, GroupOrder } from "."
 import { ImmutableBytesBuffer, MutableBytesBuffer } from "../buffer"
-import { Location, Tuple, Parameters } from "../data_structure"
+import { Location, Tuple, Parameters } from "../base_data"
 
 export enum FetchType {
     Standalone = 0x1,
