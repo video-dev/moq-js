@@ -188,11 +188,13 @@ export class Subscriber {
 	}
 
 	async recvObject(reader: TrackReader | SubgroupReader) {
+		console.log("got object on recvObject", reader)
 		// Get track alias from reader header
 		const track_alias = reader.header.track_alias
 
 		// Map track alias back to subscription ID
 		const subscriptionId = this.#aliasToSubscriptionMap.get(track_alias)
+		console.log("got subscriptionId", subscriptionId)
 		const callback = async (id: bigint) => {
 			const subscribe = this.#subscribe.get(id)
 			if (!subscribe) {
@@ -201,7 +203,7 @@ export class Subscriber {
 			console.log("doing subscribe on data", reader)
 			return subscribe.onData(reader)
 		}
-		if (!subscriptionId) {
+		if (subscriptionId === undefined) {
 			console.warn(`Exception track alias ${track_alias} not found in aliasToSubscriptionMap.`)
 			this.#pendingTrack.set(track_alias, callback)
 			return

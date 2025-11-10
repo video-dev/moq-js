@@ -1,5 +1,3 @@
-
-
 const MAX_U6 = Math.pow(2, 6) - 1 // 0-63 (6 bits)
 const MAX_U14 = Math.pow(2, 14) - 1 // 0-16383 (14 bits)
 const MAX_U30 = Math.pow(2, 30) - 1 // 0-1073741823 (30 bits)
@@ -8,6 +6,7 @@ const MAX_U62: bigint = 2n ** 62n - 1n // 0-4611686018427387903 (62 bits)
 
 export interface Reader {
     byteLength: number
+    waitForBytes(len: number): Promise<void>
     read(len: number): Promise<Uint8Array>
     done(): Promise<boolean>
     close(): Promise<void>
@@ -274,6 +273,13 @@ export class ReadableStreamBuffer implements Reader {
         this.readableStream = reader
     }
 
+    waitForBytes(len: number): Promise<void> {
+        if (this.buffer.byteLength >= len) {
+            return Promise.resolve()
+        }
+        return this.#fillTo(len)
+    }
+
     get byteLength(): number {
         return this.buffer.byteLength
     }
@@ -471,6 +477,10 @@ export class ReadableWritableStreamBuffer implements Reader, Writer {
     constructor(reader: ReadableStream, writer: WritableStream<Uint8Array>) {
         this.readStreamBuffer = new ReadableStreamBuffer(reader)
         this.writeStreamBuffer = new WritableStreamBuffer(writer)
+    }
+
+    waitForBytes(len: number): Promise<void> {
+        return this.readStreamBuffer.waitForBytes(len)
     }
 
     get byteLength(): number {

@@ -75,12 +75,12 @@ export class Decoder {
 	async message(): Promise<MessageWithType> {
 		const t = await this.messageType()
 		const advertisedLength = await this.r.getU16()
-		if (advertisedLength !== this.r.byteLength) {
-			// @todo: throw this error and close the session
-			// "If the length does not match the length of the message content, the receiver MUST close the session."
+		if (advertisedLength > this.r.byteLength) {
 			console.error(
-				`message: ${ControlMessageType.toString(t)} length mismatch: advertised ${advertisedLength} != ${this.r.byteLength} received`,
+				`message: ${ControlMessageType.toString(t)} length mismatch: advertised ${advertisedLength} > ${this.r.byteLength} received`,
 			)
+			// NOTE(itzmanish): should we have a timeout and retry few times even if timeout is reached?
+			await this.r.waitForBytes(advertisedLength)
 		}
 		const rawPayload = await this.r.read(advertisedLength)
 		const payload = new ImmutableBytesBuffer(rawPayload)
