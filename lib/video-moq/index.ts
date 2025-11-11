@@ -238,11 +238,15 @@ export class VideoMoq extends HTMLElement {
 		const fingerprint = urlParams.get("fingerprint") || this.getAttribute("fingerprint")
 
 		// TODO: Unsure if fingerprint should be optional
-		if (namespace === null || fingerprint === null) return
+		if (namespace === null) return
 
 		const trackNumStr = urlParams.get("trackNum") || this.trackNum
 		const trackNum: number = this.auxParseInt(trackNumStr, 0)
-		Player.create({ url: url.origin, fingerprint, canvas: this.#canvas, namespace }, trackNum)
+
+		Player.create(
+			{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
+			trackNum,
+		)
 			.then((player) => this.setPlayer(player))
 			.catch((e) => this.fail(e))
 

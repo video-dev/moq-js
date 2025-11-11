@@ -49,8 +49,8 @@ export default class Player extends EventTarget {
 		this.#catalog = catalog
 		this.#tracksByName = new Map(catalog.tracks.map((track) => [track.name, track]))
 		this.#tracknum = tracknum
-		this.#audioTrackName = ""
-		this.#videoTrackName = ""
+		this.#audioTrackName = catalog.tracks.find((track) => Catalog.isAudioTrack(track))?.name ?? ""
+		this.#videoTrackName = catalog.tracks.find((track) => Catalog.isVideoTrack(track))?.name ?? ""
 		this.#muted = false
 		this.#paused = false
 		this.#backend = new Backend({ canvas, catalog }, this)
@@ -91,9 +91,11 @@ export default class Player extends EventTarget {
 		const tracks = new Array<Catalog.Track>()
 
 		this.#catalog.tracks.forEach((track, index) => {
-			if (index == this.#tracknum || Catalog.isAudioTrack(track)) {
+			if (track.name === this.#videoTrackName || track.name === this.#audioTrackName) {
 				if (!track.namespace) throw new Error("track has no namespace")
 				if (track.initTrack) inits.add([track.namespace.join("/"), track.initTrack])
+				// log every track we push here
+				console.log("pushing track", track.name)
 				tracks.push(track)
 			}
 		})
@@ -110,6 +112,7 @@ export default class Player extends EventTarget {
 	}
 
 	async #runInit(namespace: string, name: string) {
+		console.log("running init for", namespace, name)
 		const sub = await this.#connection.subscribe([namespace], name)
 		try {
 			const init = await Promise.race([sub.data(), this.#running])
