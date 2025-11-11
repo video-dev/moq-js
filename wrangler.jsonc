@@ -1,0 +1,11 @@
+{
+    "name": "moq-js-player",
+    "compatibility_date": "2025-11-11", // Update to the day you deploy
+    "pages_build_output_dir": "./web/dist",
+    "kv_namespaces": [
+        {
+            "binding": "SESSION",
+            "preview_id": ""
+        }
+    ]
+}

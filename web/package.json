@@ -13,7 +13,7 @@
 		"fmt": "prettier --write . --plugin=prettier-plugin-astro"
 	},
 	"dependencies": {
-		"@astrojs/cloudflare": "^12.6.10",
+		"@astrojs/cloudflare": "^8.1.0",
 		"@astrojs/mdx": "^1.1.0",
 		"@astrojs/node": "^6.0.1",
 		"@astrojs/solid-js": "^3.0.1",

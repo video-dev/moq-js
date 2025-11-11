@@ -13,10 +13,15 @@ export default defineConfig({
     // Disable injecting a basic `base.css` import on every page.
     applyBaseStyles: false
   })],
-  // Renders any non-static pages using node
-  adapter: cloudflare(),
+  // Renders any non-static pages using Cloudflare
+  adapter: cloudflare({
+    mode: "directory",
+    routes: {
+      strategy: "auto"
+    }
+  }),
   // Default to static rendering, but allow server rendering per-page
-  output: "static",
+  output: "hybrid",
   vite: {
     base: "./",
     server: {

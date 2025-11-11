@@ -1,5 +1,5 @@
 // import { Broadcast, VideoEncoder, AudioEncoder } from "@kixelated/moq/contribute"
-// import { Client, Connection } from "@kixelated/moq/transport"
+// import { Client, Connection } from "@moq-js/player/simple-player"
 import {
 	createSignal,
 	createEffect,
@@ -414,13 +414,13 @@ function Device(props: {
 				audioDeviceId() === "disabled"
 					? false
 					: {
-							channelCount: {
-								ideal: 2,
-								max: 2,
-							},
-							sampleRate: { ideal: 48_000 },
-							deviceId: audioDeviceId(),
+						channelCount: {
+							ideal: 2,
+							max: 2,
 						},
+						sampleRate: { ideal: 48_000 },
+						deviceId: audioDeviceId(),
+					},
 			video: videoDeviceId() === "disabled" ? false : videoTrackConstraints,
 		})
 	}
