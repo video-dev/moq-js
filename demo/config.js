@@ -10,7 +10,7 @@ const LOCALHOST_CONFIG = {
 
 // Production configuration (Cloudflare)
 const CLOUDFLARE_CONFIG = {
-  relay: "https://interop-relay.cloudflare.mediaoverquic.com",
+  relay: "https://relay.cloudflare.mediaoverquic.com",
   fingerprint: null, // No fingerprint needed for trusted certificate
   environment: "production"
 };
