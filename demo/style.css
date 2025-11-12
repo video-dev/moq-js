@@ -1,0 +1,469 @@
+/* MoQT Demo Site Styles */
+/* Clean, minimal design with orange accent colors */
+
+:root {
+    --primary-color: #ff6b35;
+    --primary-dark: #e55a2b;
+    --secondary-color: #f4f4f4;
+    --text-color: #333;
+    --text-light: #666;
+    --border-color: #ddd;
+    --success-color: #28a745;
+    --error-color: #dc3545;
+    --warning-color: #ffc107;
+    --background-color: #ffffff;
+    --card-background: #fafafa;
+    --shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    --radius: 8px;
+    --spacing: 1rem;
+    --spacing-lg: 2rem;
+    --font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu,
+        Cantarell, sans-serif;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: var(--font-family);
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: var(--background-color);
+}
+
+/* Layout */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 var(--spacing);
+}
+
+/* Header */
+.header {
+    text-align: center;
+    padding: var(--spacing-lg) 0;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: var(--spacing-lg);
+}
+
+.header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    color: var(--text-light);
+    font-weight: 400;
+}
+
+/* Main Content */
+.main-content {
+    display: grid;
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Publisher Section */
+.publisher-section,
+.player-section {
+    background: var(--card-background);
+    padding: var(--spacing-lg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.publisher-section h2,
+.player-section h2 {
+    margin-bottom: var(--spacing);
+    color: var(--text-color);
+}
+
+.publisher-container,
+.player-container {
+    margin: var(--spacing) 0;
+}
+
+/* Video Player Styling */
+.video-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    background: #000;
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+video-moq {
+    width: 100%;
+    height: auto;
+    min-height: 400px;
+    display: block;
+}
+
+/* Ensure dynamically created video elements display properly */
+#videoWrapper {
+    width: 100%;
+    min-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+}
+
+#videoWrapper video-moq {
+    width: 100%;
+    height: auto;
+    min-height: 400px;
+}
+
+/* Controls */
+.controls,
+.player-controls {
+    display: flex;
+    gap: var(--spacing);
+    margin: var(--spacing) 0;
+    flex-wrap: wrap;
+}
+
+/* Buttons */
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--primary-dark);
+    transform: translateY(-1px);
+}
+
+.btn-secondary {
+    background: var(--secondary-color);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #e8e8e8;
+    border-color: #ccc;
+}
+
+.btn-copy {
+    background: #007bff;
+    color: white;
+}
+
+.btn-copy:hover:not(:disabled) {
+    background: #0056b3;
+}
+
+.btn-copy.copied {
+    background: var(--success-color);
+}
+
+/* Status Indicator */
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: var(--spacing) 0;
+    padding: 0.5rem;
+    background: white;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--text-light);
+    transition: background-color 0.3s ease;
+}
+
+.status-dot.connected {
+    background: var(--success-color);
+    box-shadow: 0 0 8px rgba(40, 167, 69, 0.4);
+}
+
+.status-dot.disconnected {
+    background: var(--error-color);
+}
+
+.status-text {
+    font-weight: 500;
+    color: var(--text-color);
+}
+
+/* Player Link Section */
+.player-link-section {
+    background: white;
+    padding: var(--spacing-lg);
+    border-radius: var(--radius);
+    border: 2px dashed var(--primary-color);
+    margin: var(--spacing) 0;
+}
+
+.link-container {
+    display: flex;
+    gap: 0.5rem;
+    margin: var(--spacing) 0;
+}
+
+.link-input {
+    flex: 1;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    font-family: monospace;
+    font-size: 0.9rem;
+    background: var(--secondary-color);
+}
+
+/* Info Sections */
+.info-section,
+.stream-info,
+.actions-section,
+.help-section,
+.config-section {
+    background: white;
+    padding: var(--spacing-lg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+}
+
+.info-section h3,
+.stream-info h3,
+.actions-section h3 {
+    margin-bottom: var(--spacing);
+    color: var(--text-color);
+}
+
+.info-section ul {
+    list-style: none;
+    padding: 0;
+}
+
+.info-section li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.info-section li:last-child {
+    border-bottom: none;
+}
+
+/* Info Grid */
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing);
+}
+
+.info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.info-item label {
+    font-weight: 600;
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.info-item span {
+    font-family: monospace;
+    background: var(--secondary-color);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+/* Action Buttons */
+.action-buttons {
+    display: flex;
+    gap: var(--spacing);
+    flex-wrap: wrap;
+}
+
+/* Error Message */
+.error-message {
+    background: #fff5f5;
+    border: 2px solid var(--error-color);
+    border-radius: var(--radius);
+    padding: var(--spacing-lg);
+    text-align: center;
+    color: var(--error-color);
+}
+
+.error-message h3 {
+    margin-bottom: var(--spacing);
+}
+
+/* Help Section */
+.help-section details {
+    cursor: pointer;
+}
+
+.help-section summary {
+    font-weight: 600;
+    padding: var(--spacing);
+    background: var(--secondary-color);
+    border-radius: var(--radius);
+    margin-bottom: var(--spacing);
+}
+
+.help-content h4 {
+    margin: var(--spacing) 0 0.5rem 0;
+    color: var(--text-color);
+}
+
+.help-content ul {
+    margin-bottom: var(--spacing);
+    padding-left: 1.5rem;
+}
+
+.help-content li {
+    margin-bottom: 0.5rem;
+}
+
+/* Config Section */
+.config-info {
+    margin-top: var(--spacing);
+}
+
+.config-info p {
+    margin-bottom: 0.5rem;
+    font-family: monospace;
+    font-size: 0.9rem;
+}
+
+.config-info strong {
+    color: var(--text-color);
+}
+
+/* Footer */
+.footer {
+    text-align: center;
+    padding: var(--spacing-lg) 0;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-light);
+}
+
+.footer a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.footer a:hover {
+    text-decoration: underline;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container {
+        padding: 0 1rem;
+    }
+
+    .header h1 {
+        font-size: 2rem;
+    }
+
+    .controls,
+    .player-controls,
+    .action-buttons {
+        flex-direction: column;
+    }
+
+    .link-container {
+        flex-direction: column;
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .header {
+        padding: var(--spacing) 0;
+    }
+
+    .header h1 {
+        font-size: 1.5rem;
+    }
+
+    .publisher-section,
+    .player-section,
+    .info-section,
+    .stream-info,
+    .actions-section,
+    .help-section {
+        padding: var(--spacing);
+    }
+}
+
+/* Animation for smooth transitions */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.player-link-section,
+.error-message {
+    animation: fadeIn 0.3s ease;
+}
+
+/* Focus styles for accessibility */
+.btn:focus,
+.link-input:focus,
+details summary:focus {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Print styles */
+@media print {
+    .controls,
+    .player-controls,
+    .action-buttons,
+    .btn {
+        display: none;
+    }
+}

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>MoQT Demo - Publisher</title>
+        <link rel="stylesheet" href="style.css" />
+    </head>
+    <body>
+        <div class="container">
+            <header class="header">
+                <h1>MoQT Video Streaming Demo</h1>
+                <p class="subtitle">
+                    Media over QUIC Transport - Ultra-low latency streaming
+                </p>
+            </header>
+
+            <main class="main-content">
+                <div class="publisher-section">
+                    <h2>MoQT Publisher</h2>
+                    <p>
+                        The publisher component below handles everything
+                        automatically. Use its built-in controls to start
+                        streaming and copy the generated player links to share
+                        with viewers.
+                    </p>
+
+                    <div class="publisher-container">
+                        <publisher-moq
+                            id="publisher"
+                            width="800px"
+                            height="450px"
+                        >
+                        </publisher-moq>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <h3>How it works</h3>
+                    <ul>
+                        <li>
+                            🚀 <strong>Ultra-low latency:</strong> Optimized for
+                            real-time streaming performance
+                        </li>
+                        <li>
+                            🌐 <strong>Global edge network:</strong> Powered by
+                            Cloudflare's worldwide infrastructure
+                        </li>
+                        <li>
+                            📱 <strong>Cross-platform:</strong> Works on any
+                            modern browser with WebRTC support
+                        </li>
+                        <li>
+                            🔒 <strong>Secure:</strong> End-to-end encrypted
+                            transport over QUIC
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="config-section">
+                    <details>
+                        <summary>Configuration</summary>
+                        <div class="config-info">
+                            <p>
+                                <strong>Environment:</strong>
+                                <span id="currentEnv"></span>
+                            </p>
+                            <p>
+                                <strong>Relay:</strong>
+                                <span id="currentRelay"></span>
+                            </p>
+                            <p>
+                                <strong>Status:</strong>
+                                <span id="currentStatus"
+                                    >Component will handle publishing</span
+                                >
+                            </p>
+                        </div>
+                    </details>
+                </div>
+            </main>
+
+            <footer class="footer">
+                <p>
+                    Powered by
+                    <a
+                        href="https://datatracker.ietf.org/wg/moq/about/"
+                        target="_blank"
+                        >MoQT Protocol</a
+                    >
+                </p>
+            </footer>
+        </div>
+
+        <!-- Load configuration first -->
+        <script src="config.js"></script>
+
+        <!-- Load MoQ publisher library from local copy -->
+        <script src="lib/moq-publisher.iife.js"></script>
+
+        <!-- Publisher page logic -->
+        <script>
+            // Simple configuration setup - let the component handle everything else
+            document.addEventListener("DOMContentLoaded", () => {
+                const publisherElement = document.getElementById("publisher");
+                const currentEnv = document.getElementById("currentEnv");
+                const currentRelay = document.getElementById("currentRelay");
+                const currentStatus = document.getElementById("currentStatus");
+
+                // Update config display
+                if (currentEnv)
+                    currentEnv.textContent = window.MoQConfig.getEnvironment();
+                if (currentRelay)
+                    currentRelay.textContent = window.MoQConfig.getRelayUrl();
+
+                // Configure the publisher component
+                if (publisherElement) {
+                    publisherElement.setAttribute(
+                        "src",
+                        window.MoQConfig.getRelayUrl(),
+                    );
+
+                    if (window.MoQConfig.getFingerprintUrl()) {
+                        publisherElement.setAttribute(
+                            "fingerprint",
+                            window.MoQConfig.getFingerprintUrl(),
+                        );
+                    }
+
+                    // Set the playback base URL for the component's generated player links
+                    const baseUrl =
+                        window.location.origin +
+                        window.location.pathname.replace("index.html", "");
+                    publisherElement.setAttribute(
+                        "playbackbaseurl",
+                        `${baseUrl}player.html?namespace=`,
+                    );
+
+                    if (currentStatus)
+                        currentStatus.textContent =
+                            "Component configured and ready";
+                }
+            });
+        </script>
+    </body>
+</html>
