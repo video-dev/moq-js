@@ -10,6 +10,13 @@
   X-XSS-Protection: 1; mode=block
   Referrer-Policy: strict-origin-when-cross-origin
 
+# Allow same-origin resources
+/*.js
+  Cross-Origin-Resource-Policy: same-origin
+
+/*.css
+  Cross-Origin-Resource-Policy: same-origin
+
 # Additional CORS headers for API requests
 /api/*
   Access-Control-Allow-Origin: *
