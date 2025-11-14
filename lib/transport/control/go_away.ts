@@ -21,6 +21,10 @@ export namespace GoAway {
 
     export function deserialize(reader: ImmutableBytesBuffer): GoAway {
         const session_uri = reader.getUtf8String()
+        if (session_uri.length > 8192) {
+            // TODO(itzmanish): should be PROTOCOL_ERROR
+            throw new Error("session_uri too long")
+        }
         return {
             session_uri
         }

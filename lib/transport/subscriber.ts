@@ -5,6 +5,7 @@ import type { TrackReader } from "./objects"
 import { debug } from "./utils"
 import { ControlStream } from "./stream"
 import { SubgroupReader } from "./subgroup"
+import { MigrationState } from "./connection"
 
 export interface TrackInfo {
 	track_alias: bigint
@@ -14,6 +15,9 @@ export interface TrackInfo {
 export class Subscriber {
 	// Use to send control messages.
 	#control: ControlStream
+
+	#migrationState: MigrationState = "none"
+	#tracksToMigrate = new Set<[string[], string]>()
 
 	// Use to send objects.
 	#objects: Objects
@@ -36,6 +40,24 @@ export class Subscriber {
 
 	publishedNamespaces(): Watch<PublishNamespaceRecv[]> {
 		return this.#publishedNamespacesQueue
+	}
+
+	async startMigration() {
+		this.#migrationState = "in_progress"
+		// close all the subscription
+		this.#trackToIDMap.forEach(async (id, track) => {
+			await this.unsubscribe(track, true);
+		})
+	}
+
+	async migrationDone(control: ControlStream, objects: Objects) {
+		this.#migrationState = "done"
+		this.#control = control
+		this.#objects = objects
+		this.#tracksToMigrate.forEach(async (track) => {
+			await this.subscribe(track[0], track[1]);
+		})
+		this.#tracksToMigrate.clear()
 	}
 
 	async recv(msg: Control.MessageWithType) {
@@ -82,8 +104,10 @@ export class Subscriber {
 	}
 
 	async subscribe_namespace(namespace: string[]) {
+		if (this.#migrationState === "in_progress") {
+			throw new Error(`migration in progress`)
+		}
 		const id = this.#control.nextRequestId()
-		// TODO(itzmanish): implement this
 		const msg: Control.MessageWithType = {
 			type: Control.ControlMessageType.SubscribeNamespace,
 			message: {
@@ -95,6 +119,9 @@ export class Subscriber {
 	}
 
 	async subscribe(namespace: string[], track: string) {
+		if (this.#migrationState === "in_progress") {
+			throw new Error(`migration in progress`)
+		}
 		const id = this.#control.nextRequestId()
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
@@ -122,22 +149,29 @@ export class Subscriber {
 		return subscribe
 	}
 
-	async unsubscribe(track: string) {
-		if (this.#trackToIDMap.has(track)) {
-			const trackID = this.#trackToIDMap.get(track)
-			if (trackID === undefined) {
-				console.warn(`Exception track ${track} not found in trackToIDMap.`)
-				return
-			}
-			try {
-				await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
-				this.#trackToIDMap.delete(track)
-			} catch (error) {
-				console.error(`Failed to unsubscribe from track ${track}:`, error)
-			}
-		} else {
-			console.warn(`During unsubscribe request initiation attempt track ${track} not found in trackToIDMap.`)
+	async unsubscribe(track: string, isMigrating = false) {
+		const trackID = this.#trackToIDMap.get(track)
+
+		if (trackID === undefined) {
+			console.warn(`Exception track ${track} not found in trackToIDMap.`)
+			return
 		}
+
+		try {
+			const subscription = this.#subscribe.get(trackID)
+			if (subscription) {
+				this.#subscribe.delete(trackID)
+				await subscription.close()
+				if (isMigrating) {
+					this.#tracksToMigrate.add([subscription.namespace, track])
+				}
+			}
+			this.#trackToIDMap.delete(track)
+
+		} catch (error) {
+			console.error(`Failed to unsubscribe from track ${track}:`, error)
+		}
+
 	}
 
 	recvSubscribeOk(msg: Control.SubscribeOk) {
@@ -265,8 +299,10 @@ export class SubscribeSend {
 	}
 
 	async close(_code = 0n, _reason = "") {
-		// TODO implement unsubscribe
-		// await this.#inner.sendReset(code, reason)
+		this.#control.send({
+			type: Control.ControlMessageType.Unsubscribe,
+			message: { id: this.#id }
+		})
 	}
 
 	onOk(trackAlias: bigint) {

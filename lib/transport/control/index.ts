@@ -59,6 +59,7 @@ type MessageWithType =
     | { type: ControlMessageType.SubscribeNamespaceOk; message: SubscribeNamespaceOk }
     | { type: ControlMessageType.SubscribeNamespaceError; message: SubscribeNamespaceError }
     | { type: ControlMessageType.Unsubscribe; message: Unsubscribe }
+    | { type: ControlMessageType.GoAway; message: GoAway }
 
 type Message = Subscriber | Publisher
 

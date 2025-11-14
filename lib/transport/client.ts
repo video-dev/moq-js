@@ -26,17 +26,20 @@ export class Client {
 		})
 	}
 
-	async connect(): Promise<Connection> {
+	async createQuic(sessionUri?: string): Promise<WebTransport> {
 		const options: WebTransportOptions = {}
 
 		const fingerprint = await this.#fingerprint
 		if (fingerprint) options.serverCertificateHashes = [fingerprint]
 
-		const quic = new WebTransport(this.config.url, options)
+		const uri = sessionUri ?? this.config.url
+		const quic = new WebTransport(uri, options)
 		await quic.ready
+		return quic
+	}
 
+	async prepareConnection(quic: WebTransport): Promise<{ control: Stream.ControlStream, objects: Objects }> {
 		const stream = await quic.createBidirectionalStream({ sendOrder: Number.MAX_SAFE_INTEGER })
-
 		const buffer = new ReadableWritableStreamBuffer(stream.readable, stream.writable)
 
 		const msg: Control.ClientSetup = {
@@ -57,7 +60,21 @@ export class Client {
 		const control = new Stream.ControlStream(buffer)
 		const objects = new Objects(quic)
 
-		return new Connection(quic, control, objects)
+		return { control, objects }
+	}
+
+	async migrateSession(sessionUri?: string): Promise<{ quic: WebTransport, control: Stream.ControlStream, objects: Objects }> {
+		const quic = await this.createQuic(sessionUri)
+		const { control, objects } = await this.prepareConnection(quic)
+		return { quic, control, objects }
+	}
+
+	async connect(sessionUri?: string): Promise<Connection> {
+		const quic = await this.createQuic(sessionUri)
+		const { control, objects } = await this.prepareConnection(quic)
+		const conn = new Connection(quic, control, objects)
+		conn.onMigration = this.migrateSession.bind(this)
+		return conn
 	}
 
 	async #fetchFingerprint(url?: string): Promise<WebTransportHash | undefined> {

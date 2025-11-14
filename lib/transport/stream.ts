@@ -9,6 +9,7 @@ import {
 	Subscribe, SubscribeOk, SubscribeError,
 	SubscribeUpdate, SubscribeNamespace,
 	SubscribeNamespaceOk, SubscribeNamespaceError,
+	GoAway,
 } from "./control"
 import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
@@ -94,6 +95,12 @@ export class Decoder {
 
 		let res: MessageWithType
 		switch (t) {
+			case ControlMessageType.GoAway:
+				res = {
+					type: t,
+					message: GoAway.deserialize(payload),
+				}
+				break
 			case ControlMessageType.Subscribe:
 				res = {
 					type: t,

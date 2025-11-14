@@ -3,10 +3,13 @@ import { ControlStream } from "./stream"
 import { Queue, Watch } from "../common/async"
 import { Objects, TrackWriter, ObjectDatagramType } from "./objects"
 import { SubgroupType, SubgroupWriter } from "./subgroup"
+import { MigrationState } from "./connection"
 
 export class Publisher {
 	// Used to send control messages
 	#control: ControlStream
+
+	#migrationState: MigrationState = "none"
 
 	// Use to send objects.
 	#objects: Objects
@@ -27,7 +30,21 @@ export class Publisher {
 		this.#objects = objects
 	}
 
+	async startMigration() {
+		this.#migrationState = "in_progress"
+	}
+
+	async migrationDone(control: ControlStream, objects: Objects) {
+		this.#migrationState = "done"
+		this.#control = control
+		this.#objects = objects
+		// NOTE(itzmanish): should we republish all the tracks?
+	}
+
 	async publish_namespace(namespace: string[]): Promise<PublishNamespaceSend> {
+		if (this.#migrationState === "in_progress") {
+			throw new Error(`migration in progress`)
+		}
 		if (this.#publishedNamespaces.has(namespace.join("/"))) {
 			throw new Error(`already announced: ${namespace.join("/")}`)
 		}
@@ -103,6 +120,9 @@ export class Publisher {
 	}
 
 	async recvSubscribe(msg: Control.Subscribe) {
+		if (this.#migrationState === "in_progress") {
+			throw new Error(`migration in progress`)
+		}
 		try {
 			if (this.#subscribe.has(msg.id)) {
 				throw new Error(`duplicate subscribe for id: ${msg.id}`)

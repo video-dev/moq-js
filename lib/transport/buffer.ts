@@ -143,6 +143,7 @@ export class ImmutableBytesBuffer {
 
     getUtf8String(): string {
         const len = this.getNumberVarInt()
+        if (len === 0) return ""
         const val = this.getBytes(len)
         return new TextDecoder().decode(val)
     }

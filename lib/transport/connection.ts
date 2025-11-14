@@ -6,7 +6,10 @@ import { ControlStream } from "./stream"
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
 
+export type MigrationState = "none" | "in_progress" | "done"
+
 export class Connection {
+	#migrationState: MigrationState = "none"
 	// The established WebTransport session.
 	#quic: WebTransport
 
@@ -34,6 +37,11 @@ export class Connection {
 		this.#subscriber = new Subscriber(this.#controlStream, this.#objects)
 
 		this.#running = this.#run()
+	}
+
+	// Callback, should be set when creating connection in the client
+	onMigration: (sessionUri?: string) => Promise<{ quic: WebTransport, control: ControlStream, objects: Objects }> = async () => {
+		throw new Error("not implemented")
 	}
 
 	close(code = 0, reason = "") {
@@ -95,11 +103,41 @@ export class Connection {
 	}
 
 	async #recv(msg: Control.MessageWithType) {
-		if (Control.isPublisher(msg.type)) {
+		if (msg.type === Control.ControlMessageType.GoAway) {
+			await this.#handleGoAway(msg.message)
+		} else if (Control.isPublisher(msg.type)) {
 			await this.#subscriber.recv(msg)
 		} else {
 			await this.#publisher.recv(msg)
 		}
+	}
+
+	async #handleGoAway(msg: Control.GoAway) {
+		console.log("preparing for migration, got go_away message:", msg)
+		if (this.#migrationState === "in_progress") {
+			throw new Error("go away received twice")
+		}
+		this.#migrationState = "in_progress"
+		await this.#subscriber.startMigration()
+		await this.#publisher.startMigration()
+
+		// FIXME(itzmanish): is this how we close the quic connection for go_away?
+		this.#quic.close({ closeCode: 0, reason: "going_away" })
+
+		const { quic, control, objects } = await this.onMigration(msg.session_uri)
+		this.#quic = quic
+		this.#controlStream = control
+		this.#objects = objects
+		this.#migrationState = "done"
+
+		await this.#publisher.migrationDone(control, objects)
+		await this.#subscriber.migrationDone(control, objects)
+	}
+
+	async migrateSession(quic: WebTransport, control: ControlStream, objects: Objects) {
+		this.#quic = quic
+		this.#controlStream = control
+		this.#objects = objects
 	}
 
 	async closed(): Promise<Error> {
