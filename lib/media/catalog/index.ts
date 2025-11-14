@@ -54,10 +54,11 @@ export async function fetch(connection: Connection, namespace: string[]) {
 		const segment = await subscribe.data()
 		if (!segment) throw new Error("no catalog data")
 
+		console.log("catalog segment", segment)
 		const chunk = await segment.read()
 		if (!chunk) throw new Error("no catalog chunk")
 
-		debug("catalog chunk", chunk)
+		console.log("catalog chunk", chunk)
 		await segment.close()
 		await subscribe.close() // we done
 

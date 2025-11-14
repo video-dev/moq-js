@@ -33,7 +33,6 @@ export class Connection {
 		this.#publisher = new Publisher(this.#controlStream, this.#objects)
 		this.#subscriber = new Subscriber(this.#controlStream, this.#objects)
 
-		console.log("am I starting running?")
 		this.#running = this.#run()
 	}
 
@@ -84,6 +83,7 @@ export class Connection {
 			console.log("starting object loop")
 			for (; ;) {
 				const obj = await this.#objects.recv()
+				console.log("object loop got obj", obj)
 				if (!obj) break
 
 				await this.#subscriber.recvObject(obj)

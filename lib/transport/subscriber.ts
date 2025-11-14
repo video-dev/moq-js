@@ -24,8 +24,6 @@ export class Subscriber {
 
 	// Our subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeSend>()
-	#subscribeNext = 0n
-
 	#trackToIDMap = new Map<string, bigint>()
 	#trackAliasMap = new Map<bigint, bigint>() // Maps request ID to track alias
 	#aliasToSubscriptionMap = new Map<bigint, bigint>() // Maps track alias to subscription ID
@@ -34,13 +32,6 @@ export class Subscriber {
 	constructor(control: ControlStream, objects: Objects) {
 		this.#control = control
 		this.#objects = objects
-	}
-
-	// subscriber request id increases by even number for clients
-	private nextSubscriberReqId(): bigint {
-		const id = this.#subscribeNext
-		this.#subscribeNext += 2n
-		return id
 	}
 
 	publishedNamespaces(): Watch<PublishNamespaceRecv[]> {
@@ -77,10 +68,10 @@ export class Subscriber {
 
 		await this.#control.send({
 			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { namespace: msg.namespace }
+			message: { id: msg.id }
 		})
 
-		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace)
+		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
 		this.#publishedNamespaces.set(msg.namespace.join("/"), publishNamespace)
 
 		this.#publishedNamespacesQueue.update((queue) => [...queue, publishNamespace])
@@ -91,7 +82,7 @@ export class Subscriber {
 	}
 
 	async subscribe_namespace(namespace: string[]) {
-		const id = this.nextSubscriberReqId()
+		const id = this.#control.nextRequestId()
 		// TODO(itzmanish): implement this
 		const msg: Control.MessageWithType = {
 			type: Control.ControlMessageType.SubscribeNamespace,
@@ -104,7 +95,7 @@ export class Subscriber {
 	}
 
 	async subscribe(namespace: string[], track: string) {
-		const id = this.nextSubscriberReqId()
+		const id = this.#control.nextRequestId()
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
 		this.#subscribe.set(id, subscribe)
@@ -215,15 +206,17 @@ export class Subscriber {
 
 export class PublishNamespaceRecv {
 	#control: ControlStream
+	#id: bigint
 
 	readonly namespace: string[]
 
 	// The current state of the publish namespace
 	#state: "init" | "ack" | "closed" = "init"
 
-	constructor(control: ControlStream, namespace: string[]) {
+	constructor(control: ControlStream, namespace: string[], id: bigint) {
 		this.#control = control // so we can send messages
 		this.namespace = namespace
+		this.#id = id
 	}
 
 	// Acknowledge the publish namespace as valid.
@@ -234,7 +227,7 @@ export class PublishNamespaceRecv {
 		// Send the control message.
 		return this.#control.send({
 			type: Control.ControlMessageType.PublishNamespaceOk,
-			message: { namespace: this.namespace }
+			message: { id: this.#id }
 		})
 	}
 
@@ -244,7 +237,7 @@ export class PublishNamespaceRecv {
 
 		return this.#control.send({
 			type: Control.ControlMessageType.PublishNamespaceError,
-			message: { namespace: this.namespace, code, reason }
+			message: { id: this.#id, code, reason }
 		})
 	}
 }

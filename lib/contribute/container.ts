@@ -18,10 +18,16 @@ export class Container {
 
 		this.encode = new TransformStream({
 			transform: (frame, controller) => {
-				if (isDecoderConfig(frame)) {
-					return this.#init(frame, controller)
-				} else {
-					return this.#enqueue(frame, controller)
+				try {
+					if (isDecoderConfig(frame)) {
+						console.log("Container received decoder config:", frame)
+						return this.#init(frame, controller)
+					} else {
+						return this.#enqueue(frame, controller)
+					}
+				} catch (e) {
+					console.error("Container failed to process frame:", e)
+					throw e
 				}
 			},
 		})
@@ -64,7 +70,6 @@ export class Container {
 			const data = new MP4.Stream(desc, 8, MP4.Stream.LITTLE_ENDIAN)
 			dops.parse(data)
 
-			dops.Version = 0
 			options.description = dops
 			options.hdlr = "soun"
 		} else {
@@ -120,7 +125,7 @@ export class Container {
 
 		// Moof and mdat atoms are written in pairs.
 		// TODO remove the moof/mdat from the Box to reclaim memory once everything works
-		for (;;) {
+		for (; ;) {
 			const moof = this.#mp4.moofs.shift()
 			const mdat = this.#mp4.mdats.shift()
 

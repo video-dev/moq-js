@@ -258,11 +258,11 @@ export class Objects {
 
 		const r = new ReadableStreamBuffer(value)
 		const type = await r.getNumberVarInt()
-		console.log("Objects.recv got type", type)
 
 		// Try to parse as SubgroupType
 		try {
 			const subgroupType = SubgroupType.try_from(type)
+			console.log("Objects.recv got type", subgroupType)
 
 			const track_alias = await r.getVarInt()
 			const group_id = await r.getNumberVarInt()
@@ -286,6 +286,8 @@ export class Objects {
 				subgroup_id,
 				publisher_priority,
 			}
+
+			console.log("Objects.recv got subgroup header", h)
 
 			return new SubgroupReader(h, r)
 		} catch (e) {

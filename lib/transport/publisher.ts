@@ -13,6 +13,7 @@ export class Publisher {
 
 	// Our announced tracks.
 	#publishedNamespaces = new Map<string, PublishNamespaceSend>()
+	#waitingPublishNamespaceRequests = new Map<bigint, string>()
 
 	// Their subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeRecv>()
@@ -33,10 +34,13 @@ export class Publisher {
 
 		const publishNamespaceSend = new PublishNamespaceSend(this.#control, namespace)
 		this.#publishedNamespaces.set(namespace.join("/"), publishNamespaceSend)
+		const id = this.#control.nextRequestId()
+		this.#waitingPublishNamespaceRequests.set(id, namespace.join("/"))
 
 		await this.#control.send({
 			type: Control.ControlMessageType.PublishNamespace,
 			message: {
+				id,
 				namespace,
 			},
 		})
@@ -70,19 +74,28 @@ export class Publisher {
 	}
 
 	recvPublishNamespaceOk(msg: Control.PublishNamespaceOk) {
-		const publishNamespaceSend = this.#publishedNamespaces.get(msg.namespace.join("/"))
+		const namespace = this.#waitingPublishNamespaceRequests.get(msg.id)
+		if (!namespace) {
+			throw new Error(`publish namespace OK for unknown announce: ${msg.id}`)
+		}
+		const publishNamespaceSend = this.#publishedNamespaces.get(namespace)
 		if (!publishNamespaceSend) {
-			throw new Error(`publish namespace OK for unknown announce: ${msg.namespace.join("/")}`)
+			throw new Error(`no active published namespace: ${namespace}`)
 		}
 
 		publishNamespaceSend.onOk()
+		console.log("published namespace:", namespace)
 	}
 
 	recvPublishNamespaceError(msg: Control.PublishNamespaceError) {
-		const publishNamespaceSend = this.#publishedNamespaces.get(msg.namespace.join("/"))
+		const namespace = this.#waitingPublishNamespaceRequests.get(msg.id)
+		if (!namespace) {
+			throw new Error(`publish namespace error for unknown announce: ${msg.id}`)
+		}
+		const publishNamespaceSend = this.#publishedNamespaces.get(namespace)
 		if (!publishNamespaceSend) {
 			// TODO debug this
-			console.warn(`publish namespace error for unknown announce: ${msg.namespace.join("/")}`)
+			console.warn(`publish namespace error for unknown announce: ${namespace}`)
 			return
 		}
 
@@ -90,31 +103,35 @@ export class Publisher {
 	}
 
 	async recvSubscribe(msg: Control.Subscribe) {
-		if (this.#subscribe.has(msg.id)) {
-			throw new Error(`duplicate subscribe for id: ${msg.id}`)
-		}
-
-		const trackAlias = this.#nextTrackAlias++
-		const subscribe = new SubscribeRecv(this.#control, this.#objects, msg, trackAlias)
-		this.#subscribe.set(msg.id, subscribe)
-		await this.#subscribeQueue.push(subscribe)
-
-		// NOTE(itzmanish): revisit this
-		await this.#control.send({
-			type: Control.ControlMessageType.SubscribeOk,
-			message: {
-				id: msg.id,
-				expires: 0n,
-				content_exists: 0,
-				group_order: msg.group_order,
-				track_alias: trackAlias,
-				params: new Map(),
+		try {
+			if (this.#subscribe.has(msg.id)) {
+				throw new Error(`duplicate subscribe for id: ${msg.id}`)
 			}
-		})
+
+			const trackAlias = this.#nextTrackAlias++
+			const subscribe = new SubscribeRecv(this.#control, this.#objects, msg, trackAlias)
+			this.#subscribe.set(msg.id, subscribe)
+			await this.#subscribeQueue.push(subscribe)
+		} catch (e: any) {
+			await this.#control.send({
+				type: Control.ControlMessageType.SubscribeError,
+				message: {
+					id: msg.id,
+					code: 0n,
+					reason: e.message,
+				}
+			})
+			throw e
+		}
 	}
 
-	recvUnsubscribe(_msg: Control.Unsubscribe) {
-		throw new Error("TODO unsubscribe")
+	recvUnsubscribe(msg: Control.Unsubscribe) {
+		const subscribe = this.#subscribe.get(msg.id)
+		if (!subscribe) {
+			throw new Error(`unsubscribe for unknown subscribe: ${msg.id}`)
+		}
+		subscribe.close({ unsubscribe: false })
+		this.#subscribe.delete(msg.id)
 	}
 }
 
@@ -205,6 +222,8 @@ export class SubscribeRecv {
 		if (this.#state !== "init") return
 		this.#state = "ack"
 
+		console.log("got subscribe req:", this.#id, "track:", this.#trackAlias, "sending subscribe ok")
+
 		// NOTE(itzmanish): revisit this
 		// Send the control message.
 		return this.#control.send({
@@ -221,18 +240,30 @@ export class SubscribeRecv {
 	}
 
 	// Close the subscription with an error.
-	async close(code = 0n, reason = "") {
+	async close({ code = 0n, reason = "", unsubscribe = true }: { code?: bigint; reason?: string; unsubscribe?: boolean }) {
 		if (this.#state === "closed") return
+		const acked = this.#state === "ack"
 		this.#state = "closed"
 
-		return this.#control.send({
-			type: Control.ControlMessageType.Unsubscribe,
-			message: { id: this.#id }
-		})
+		if (!acked) {
+			return this.#control.send({
+				type: Control.ControlMessageType.SubscribeError,
+				message: { id: this.#id, code, reason }
+			})
+		}
+		if (unsubscribe) {
+			return this.#control.send({
+				type: Control.ControlMessageType.Unsubscribe,
+				message: { id: this.#id }
+			})
+		}
 	}
 
 	// Create a writable data stream for the entire track (using datagrams)
 	async serve(props?: { priority: number }): Promise<TrackWriter> {
+		if (this.#state === "closed") {
+			throw new Error("subscribe closed")
+		}
 		return this.#objects.send({
 			type: ObjectDatagramType.Type0x0, // Basic datagram without extensions
 			track_alias: this.#trackAlias,
@@ -244,6 +275,9 @@ export class SubscribeRecv {
 
 	// Create a writable data stream for a subgroup within the track
 	async subgroup(props: { group: number; subgroup: number; priority?: number }): Promise<SubgroupWriter> {
+		if (this.#state === "closed") {
+			throw new Error("subscribe closed")
+		}
 		return this.#objects.send({
 			type: SubgroupType.Type0x10, // Basic subgroup without extensions
 			track_alias: this.#trackAlias,

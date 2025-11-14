@@ -49,8 +49,8 @@ export default class Player extends EventTarget {
 		this.#catalog = catalog
 		this.#tracksByName = new Map(catalog.tracks.map((track) => [track.name, track]))
 		this.#tracknum = tracknum
-		this.#audioTrackName = ""
-		this.#videoTrackName = ""
+		this.#audioTrackName = catalog.tracks.find((track) => Catalog.isAudioTrack(track))?.name ?? ""
+		this.#videoTrackName = catalog.tracks.find((track) => Catalog.isVideoTrack(track))?.name ?? ""
 		this.#muted = false
 		this.#paused = false
 		this.#backend = new Backend({ canvas, catalog }, this)
@@ -90,13 +90,16 @@ export default class Player extends EventTarget {
 		const inits = new Set<[string, string]>()
 		const tracks = new Array<Catalog.Track>()
 
-		this.#catalog.tracks.forEach((track, index) => {
-			if (index == this.#tracknum || Catalog.isAudioTrack(track)) {
+		this.#catalog.tracks.forEach((track) => {
+			if (track.name === this.#videoTrackName || track.name === this.#audioTrackName) {
 				if (!track.namespace) throw new Error("track has no namespace")
 				if (track.initTrack) inits.add([track.namespace.join("/"), track.initTrack])
 				tracks.push(track)
 			}
 		})
+
+		console.log("inits", inits)
+		console.log("tracks", tracks)
 
 		// Call #runInit on each unique init track
 		// TODO do this in parallel with #runTrack to remove a round trip

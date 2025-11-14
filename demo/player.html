@@ -92,10 +92,11 @@
 		<script src="config.js" onerror="console.error('Failed to load config.js')"></script>
 
 		<!-- Load MoQ player library with video-moq custom element -->
-		<script src="./lib/moq-player.iife.js" 
+		<script
+			src="../lib/dist/moq-player.iife.js"
 			onerror="console.error('Failed to load moq-player.iife.js')"
-			onload="console.log('moq-player.iife.js loaded successfully')">
-		</script>
+			onload="console.log('moq-player.iife.js loaded successfully')"
+		></script>
 
 		<!-- Player page logic -->
 		<script>
@@ -393,27 +394,24 @@
 			// Initialize the player when the page loads and custom element is ready
 			async function initializeWhenReady() {
 				console.log("Waiting for video-moq custom element to be defined...");
-				console.log("MoqPlayer global available:", typeof window.MoqPlayer !== 'undefined');
+				console.log("MoqPlayer global available:", typeof window.MoqPlayer !== "undefined");
 				console.log("customElements registry:", customElements);
 
 				try {
 					// Wait for the custom element to be defined with a timeout
-					const timeoutPromise = new Promise((_, reject) => 
-						setTimeout(() => reject(new Error('Timeout waiting for video-moq element')), 10000)
+					const timeoutPromise = new Promise((_, reject) =>
+						setTimeout(() => reject(new Error("Timeout waiting for video-moq element")), 10000),
 					);
-					
-					await Promise.race([
-						customElements.whenDefined("video-moq"),
-						timeoutPromise
-					]);
-					
+
+					await Promise.race([customElements.whenDefined("video-moq"), timeoutPromise]);
+
 					console.log("video-moq custom element is now defined");
 
 					// Now initialize the player
 					window.playerDemo = new MoQTPlayerDemo();
 				} catch (error) {
 					console.error("Failed to initialize player:", error);
-					
+
 					// Show error to user
 					const errorDiv = document.getElementById("errorMessage");
 					const errorText = document.getElementById("errorText");
@@ -431,7 +429,7 @@
 				console.log("Scripts loaded - checking globals...");
 				console.log("window.MoQConfig:", window.MoQConfig);
 				console.log("window.MoqPlayer:", window.MoqPlayer);
-				
+
 				await initializeWhenReady();
 			});
 

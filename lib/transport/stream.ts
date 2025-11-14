@@ -16,6 +16,7 @@ import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } fr
 export class ControlStream {
 	private decoder: Decoder
 	private encoder: Encoder
+	#nextRequestId = 0n
 
 	#mutex = Promise.resolve()
 
@@ -57,6 +58,12 @@ export class ControlStream {
 
 		// Return the lock.
 		return lock
+	}
+
+	nextRequestId(incr: bigint = 2n): bigint {
+		const id = this.#nextRequestId
+		this.#nextRequestId += incr
+		return id
 	}
 }
 

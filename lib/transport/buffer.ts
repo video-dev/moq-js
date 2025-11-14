@@ -158,11 +158,12 @@ export class MutableBytesBuffer {
     }
 
     get length(): number {
-        return this.buffer.length
+        return this.offset
     }
 
     get byteLength(): number {
-        return this.buffer.byteLength
+        // NOTE(itzmanish): since we are working with u8 buffer, byteLength is same as length
+        return this.length
     }
 
     get Uint8Array(): Uint8Array {

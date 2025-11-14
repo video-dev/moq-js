@@ -73,6 +73,7 @@ export namespace SubgroupType {
     export function deserialize(reader: ImmutableBytesBuffer): SubgroupType {
         return try_from(reader.getNumberVarInt())
     }
+
     // may throw if invalid value if provided
     export function try_from(value: number | bigint): SubgroupType {
         const v = typeof value === "bigint" ? Number(value) : value
