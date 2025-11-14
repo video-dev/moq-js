@@ -17,10 +17,8 @@ export namespace SubscribeNamespace {
         const payloadBuf = new MutableBytesBuffer(new Uint8Array())
         payloadBuf.putVarInt(v.id)
         payloadBuf.putBytes(Tuple.serialize(v.namespace))
-        if (v.params) {
-            payloadBuf.putBytes(KeyValuePairs.serialize(v.params))
-        }
-        mainBuf.putU16(payloadBuf.length)
+        payloadBuf.putBytes(KeyValuePairs.serialize(v.params ?? new Map()))
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

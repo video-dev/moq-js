@@ -14,7 +14,7 @@ export namespace GoAway {
         const payloadBuf = new MutableBytesBuffer(new Uint8Array())
         payloadBuf.putUtf8String(v.session_uri)
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

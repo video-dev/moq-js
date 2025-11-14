@@ -14,7 +14,7 @@ export namespace SubscribeNamespaceOk {
         mainBuf.putVarInt(ControlMessageType.SubscribeNamespaceOk)
         const payloadBuf = new MutableBytesBuffer(new Uint8Array())
         payloadBuf.putVarInt(v.id)
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

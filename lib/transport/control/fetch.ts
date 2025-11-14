@@ -48,7 +48,7 @@ export namespace StandaloneFetch {
         payloadBuf.putBytes(Location.serialize(v.start_location))
         payloadBuf.putBytes(Location.serialize(v.end_location))
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }
@@ -81,7 +81,7 @@ export namespace JoiningFetch {
         payloadBuf.putVarInt(v.id)
         payloadBuf.putVarInt(v.start)
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }
@@ -122,11 +122,9 @@ export namespace Fetch {
         if (v.joining) {
             payloadBuf.putBytes(JoiningFetch.serialize(v.joining))
         }
-        if (v.params) {
-            payloadBuf.putBytes(Parameters.serialize(v.params))
-        }
+        payloadBuf.putBytes(Parameters.serialize(v.params ?? new Map()))
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

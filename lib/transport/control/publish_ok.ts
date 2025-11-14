@@ -31,11 +31,9 @@ export namespace PublishOk {
         if (v.end_group) {
             payloadBuf.putVarInt(v.end_group)
         }
-        if (v.params) {
-            payloadBuf.putBytes(Parameters.serialize(v.params))
-        }
+        payloadBuf.putBytes(Parameters.serialize(v.params ?? new Map()))
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

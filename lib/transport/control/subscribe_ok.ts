@@ -32,7 +32,7 @@ export namespace SubscribeOk {
 
         payloadBuf.putBytes(Parameters.serialize(v.params))
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

@@ -30,10 +30,8 @@ export namespace Publish {
             payloadBuf.putBytes(Location.serialize(v.largest_location))
         }
         payloadBuf.putU8(v.forward)
-        if (v.params) {
-            payloadBuf.putBytes(Parameters.serialize(v.params))
-        }
-        mainBuf.putU16(payloadBuf.length)
+        payloadBuf.putBytes(Parameters.serialize(v.params ?? new Map()))
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

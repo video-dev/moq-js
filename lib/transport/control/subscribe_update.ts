@@ -25,11 +25,9 @@ export namespace SubscribeUpdate {
         payloadBuf.putVarInt(v.end_group)
         payloadBuf.putVarInt(v.subscriber_priority)
         payloadBuf.putVarInt(v.forward)
-        if (v.params) {
-            payloadBuf.putBytes(KeyValuePairs.serialize(v.params))
-        }
+        payloadBuf.putBytes(KeyValuePairs.serialize(v.params ?? new Map()))
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }

@@ -20,11 +20,9 @@ export namespace FetchOk {
         payloadBuf.putBytes(GroupOrder.serialize(v.group_order))
         payloadBuf.putU8(v.end_of_track)
         payloadBuf.putBytes(Location.serialize(v.end_location))
-        if (v.params) {
-            payloadBuf.putBytes(Parameters.serialize(v.params))
-        }
+        payloadBuf.putBytes(Parameters.serialize(v.params ?? new Map()))
 
-        mainBuf.putU16(payloadBuf.length)
+        mainBuf.putU16(payloadBuf.byteLength)
         mainBuf.putBytes(payloadBuf.Uint8Array)
         return mainBuf.Uint8Array
     }
