@@ -21,6 +21,7 @@ import { FetchCancel } from "./fetch_cancel"
 import { GoAway } from "./go_away"
 import { ClientSetup } from "./client_setup"
 import { ServerSetup } from "./server_setup"
+import { MaxRequestId } from "./max_request_id"
 
 
 enum Version {
@@ -60,6 +61,7 @@ type MessageWithType =
     | { type: ControlMessageType.SubscribeNamespaceError; message: SubscribeNamespaceError }
     | { type: ControlMessageType.Unsubscribe; message: Unsubscribe }
     | { type: ControlMessageType.GoAway; message: GoAway }
+    | { type: ControlMessageType.MaxRequestId; message: MaxRequestId }
 
 type Message = Subscriber | Publisher
 
@@ -185,6 +187,7 @@ export {
     FetchError,
     FetchCancel,
     GoAway,
+    MaxRequestId,
     ClientSetup,
     ServerSetup,
 

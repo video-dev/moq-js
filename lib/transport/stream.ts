@@ -9,7 +9,7 @@ import {
 	Subscribe, SubscribeOk, SubscribeError,
 	SubscribeUpdate, SubscribeNamespace,
 	SubscribeNamespaceOk, SubscribeNamespaceError,
-	GoAway,
+	GoAway, MaxRequestId,
 } from "./control"
 import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
@@ -17,7 +17,10 @@ import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } fr
 export class ControlStream {
 	private decoder: Decoder
 	private encoder: Encoder
+	// Our next request ID to use when sending requests
 	#nextRequestId = 0n
+	// Remote's maximum request ID (first invalid ID). Requests we send must be < this value.
+	#remoteMaxRequestId?: bigint
 
 	#mutex = Promise.resolve()
 
@@ -61,10 +64,40 @@ export class ControlStream {
 		return lock
 	}
 
+	/**
+	 * Returns the next request ID or throws if max request ID is reached.
+	 * Per spec: "If a Request ID equal to or larger than this [MAX_REQUEST_ID] is received
+	 * by the endpoint that sent the MAX_REQUEST_ID in any request message, the endpoint
+	 * MUST close the session with an error of TOO_MANY_REQUESTS."
+	 * @param incr number at which the next request ID should be incremented (default 2 for client)
+	 * @returns next request ID
+	 */
 	nextRequestId(incr: bigint = 2n): bigint {
 		const id = this.#nextRequestId
+		
+		// Check if we're about to exceed the remote's max request ID
+		if (this.#remoteMaxRequestId !== undefined && id >= this.#remoteMaxRequestId) {
+			throw new Error(`TOO_MANY_REQUESTS: Request ID ${id} >= remote max ${this.#remoteMaxRequestId}`)
+		}
+		
 		this.#nextRequestId += incr
 		return id
+	}
+
+	/**
+	 * Sets the remote's maximum request ID. Per spec:
+	 * "The Maximum Request ID MUST only increase within a session, and receipt of a
+	 * MAX_REQUEST_ID message with an equal or smaller Request ID value is a PROTOCOL_VIOLATION."
+	 * 
+	 * Note: The id parameter is the "Maximum Request ID + 1" (first invalid ID).
+	 * @param id The new maximum request ID for the session plus 1
+	 */
+	setRemoteMaxRequestId(id: bigint) {
+		// Validate that MAX_REQUEST_ID only increases
+		if (this.#remoteMaxRequestId !== undefined && id <= this.#remoteMaxRequestId) {
+			throw new Error(`PROTOCOL_VIOLATION: MAX_REQUEST_ID must only increase (received ${id}, current ${this.#remoteMaxRequestId})`)
+		}
+		this.#remoteMaxRequestId = id
 	}
 }
 
@@ -221,6 +254,12 @@ export class Decoder {
 					message: SubscribeNamespaceError.deserialize(payload),
 				}
 				break
+			case ControlMessageType.MaxRequestId:
+				res = {
+					type: t,
+					message: MaxRequestId.deserialize(payload),
+				}
+				break
 			default:
 				throw new Error(`unknown message kind: ${t}`)
 		}
@@ -280,6 +319,8 @@ export class Encoder {
 				return FetchOk.serialize(message as FetchOk)
 			case ControlMessageType.FetchError:
 				return FetchError.serialize(message as FetchError)
+			case ControlMessageType.MaxRequestId:
+				return MaxRequestId.serialize(message as MaxRequestId)
 			default:
 				throw new Error(`unknown message kind in encoder`)
 		}

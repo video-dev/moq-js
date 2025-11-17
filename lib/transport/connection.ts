@@ -105,11 +105,17 @@ export class Connection {
 	async #recv(msg: Control.MessageWithType) {
 		if (msg.type === Control.ControlMessageType.GoAway) {
 			await this.#handleGoAway(msg.message)
+		} else if (msg.type === Control.ControlMessageType.MaxRequestId) {
+			await this.#handleMaxRequestId(msg.message)
 		} else if (Control.isPublisher(msg.type)) {
 			await this.#subscriber.recv(msg)
 		} else {
 			await this.#publisher.recv(msg)
 		}
+	}
+
+	async #handleMaxRequestId(msg: Control.MaxRequestId) {
+		this.#controlStream.setRemoteMaxRequestId(msg.id)
 	}
 
 	async #handleGoAway(msg: Control.GoAway) {
