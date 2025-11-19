@@ -42,8 +42,16 @@ export class Subscriber {
 		return this.#publishedNamespacesQueue
 	}
 
+	get migrationState() {
+		return this.#migrationState
+	}
+
+	set migrationState(state: MigrationState) {
+		this.#migrationState = state
+	}
+
 	async startMigration() {
-		this.#migrationState = "in_progress"
+		this.migrationState = "in_progress"
 		// close all the subscription
 		this.#trackToIDMap.forEach(async (id, track) => {
 			await this.unsubscribe(track, true);
@@ -51,7 +59,7 @@ export class Subscriber {
 	}
 
 	async migrationDone(control: ControlStream, objects: Objects) {
-		this.#migrationState = "done"
+		this.migrationState = "done"
 		this.#control = control
 		this.#objects = objects
 		this.#tracksToMigrate.forEach(async (track) => {
@@ -104,8 +112,8 @@ export class Subscriber {
 	}
 
 	async subscribe_namespace(namespace: string[]) {
-		if (this.#migrationState === "in_progress") {
-			throw new Error(`migration in progress`)
+		if (this.migrationState !== "none") {
+			throw new Error(`migration in progress or going away`)
 		}
 		const id = this.#control.nextRequestId()
 		const msg: Control.MessageWithType = {
@@ -119,8 +127,8 @@ export class Subscriber {
 	}
 
 	async subscribe(namespace: string[], track: string) {
-		if (this.#migrationState === "in_progress") {
-			throw new Error(`migration in progress`)
+		if (this.migrationState !== "none") {
+			throw new Error(`migration in progress or going away`)
 		}
 		const id = this.#control.nextRequestId()
 

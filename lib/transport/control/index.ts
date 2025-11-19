@@ -22,6 +22,7 @@ import { GoAway } from "./go_away"
 import { ClientSetup } from "./client_setup"
 import { ServerSetup } from "./server_setup"
 import { MaxRequestId } from "./max_request_id"
+import { RequestsBlocked } from "./requests_block"
 
 
 enum Version {
@@ -62,6 +63,7 @@ type MessageWithType =
     | { type: ControlMessageType.Unsubscribe; message: Unsubscribe }
     | { type: ControlMessageType.GoAway; message: GoAway }
     | { type: ControlMessageType.MaxRequestId; message: MaxRequestId }
+    | { type: ControlMessageType.RequestsBlocked; message: RequestsBlocked }
 
 type Message = Subscriber | Publisher
 

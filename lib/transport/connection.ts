@@ -5,8 +5,9 @@ import { ControlStream } from "./stream"
 
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
+import { sleep } from "./utils"
 
-export type MigrationState = "none" | "in_progress" | "done"
+export type MigrationState = "none" | "going_away" | "in_progress" | "done"
 
 export class Connection {
 	#migrationState: MigrationState = "none"
@@ -44,12 +45,34 @@ export class Connection {
 		throw new Error("not implemented")
 	}
 
+	get migrationState() {
+		return this.#migrationState
+	}
+
 	close(code = 0, reason = "") {
 		this.#quic.close({ closeCode: code, reason })
 	}
 
 	async #run(): Promise<void> {
 		await Promise.all([this.#runControl(), this.#runObjects()])
+	}
+
+	async goaway(sessionUri?: string) {
+		await this.#controlStream.send({
+			type: Control.ControlMessageType.GoAway,
+			message: {
+				session_uri: sessionUri || "",
+			},
+		})
+		this.#migrationState = "going_away"
+		this.#subscriber.migrationState = "going_away"
+		this.#publisher.migrationState = "going_away"
+		while (this.#publisher.activeSubscribersCount > 0) {
+			// Wait for all subscribers to close
+			await sleep(100)
+		}
+		console.log("no more active publisher", this.#publisher);
+		return this.#publisher.close()
 	}
 
 	publish_namespace(namespace: string[]) {

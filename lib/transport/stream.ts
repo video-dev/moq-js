@@ -13,6 +13,7 @@ import {
 } from "./control"
 import { debug } from "./utils"
 import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
+import { RequestsBlocked } from "./control/requests_block"
 
 export class ControlStream {
 	private decoder: Decoder
@@ -74,12 +75,12 @@ export class ControlStream {
 	 */
 	nextRequestId(incr: bigint = 2n): bigint {
 		const id = this.#nextRequestId
-		
+
 		// Check if we're about to exceed the remote's max request ID
 		if (this.#remoteMaxRequestId !== undefined && id >= this.#remoteMaxRequestId) {
 			throw new Error(`TOO_MANY_REQUESTS: Request ID ${id} >= remote max ${this.#remoteMaxRequestId}`)
 		}
-		
+
 		this.#nextRequestId += incr
 		return id
 	}
@@ -128,6 +129,12 @@ export class Decoder {
 
 		let res: MessageWithType
 		switch (t) {
+			case ControlMessageType.RequestsBlocked:
+				res = {
+					type: t,
+					message: RequestsBlocked.deserialize(payload),
+				}
+				break
 			case ControlMessageType.GoAway:
 				res = {
 					type: t,
@@ -321,6 +328,10 @@ export class Encoder {
 				return FetchError.serialize(message as FetchError)
 			case ControlMessageType.MaxRequestId:
 				return MaxRequestId.serialize(message as MaxRequestId)
+			case ControlMessageType.GoAway:
+				return GoAway.serialize(message as GoAway)
+			case ControlMessageType.RequestsBlocked:
+				return RequestsBlocked.serialize(message as RequestsBlocked)
 			default:
 				throw new Error(`unknown message kind in encoder`)
 		}

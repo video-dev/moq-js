@@ -241,8 +241,8 @@ export class Broadcast {
 		video.srcObject = this.config.media
 	}
 
-	close() {
-		// TODO implement publish close
+	async close() {
+		return this.connection.goaway()
 	}
 
 	// Returns the error message when the connection is closed

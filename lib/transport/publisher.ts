@@ -30,20 +30,36 @@ export class Publisher {
 		this.#objects = objects
 	}
 
+	async close() {
+		return this.#subscribeQueue.close()
+	}
+
+	get activeSubscribersCount() {
+		return this.#subscribe.size
+	}
+
+	get migrationState() {
+		return this.#migrationState
+	}
+
+	set migrationState(state: MigrationState) {
+		this.#migrationState = state
+	}
+
 	async startMigration() {
-		this.#migrationState = "in_progress"
+		this.migrationState = "in_progress"
 	}
 
 	async migrationDone(control: ControlStream, objects: Objects) {
-		this.#migrationState = "done"
+		this.migrationState = "done"
 		this.#control = control
 		this.#objects = objects
 		// NOTE(itzmanish): should we republish all the tracks?
 	}
 
 	async publish_namespace(namespace: string[]): Promise<PublishNamespaceSend> {
-		if (this.#migrationState === "in_progress") {
-			throw new Error(`migration in progress`)
+		if (this.migrationState !== "none") {
+			throw new Error(`migration in progress or going away`)
 		}
 		if (this.#publishedNamespaces.has(namespace.join("/"))) {
 			throw new Error(`already announced: ${namespace.join("/")}`)
@@ -120,8 +136,8 @@ export class Publisher {
 	}
 
 	async recvSubscribe(msg: Control.Subscribe) {
-		if (this.#migrationState === "in_progress") {
-			throw new Error(`migration in progress`)
+		if (this.migrationState !== "none") {
+			throw new Error(`migration in progress or going away`)
 		}
 		try {
 			if (this.#subscribe.has(msg.id)) {
