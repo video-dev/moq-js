@@ -150,7 +150,7 @@ export class Broadcast {
 			console.error("failed to serve subscribe", e)
 			const err = asError(e)
 			// TODO(itzmanish): should check if the error is not found and send appropriate error code
-			await subscriber.close({ code: 0n, reason: `failed to process subscribe: ${err.message}` })
+			await subscriber.close(0n, `failed to process subscribe: ${err.message}`)
 		} finally {
 			// TODO we can't close subscribers because there's no support for clean termination
 			// await subscriber.close()
@@ -241,8 +241,9 @@ export class Broadcast {
 		video.srcObject = this.config.media
 	}
 
-	async close() {
-		return this.connection.goaway()
+	async close(isGoingAway: boolean = false) {
+		const notGoingAway = !isGoingAway
+		await this.connection.closePublisher(notGoingAway)
 	}
 
 	// Returns the error message when the connection is closed

@@ -48,6 +48,11 @@ export class Publisher {
 
 	async startMigration() {
 		this.migrationState = "in_progress"
+		for (const [id, subscribe] of this.#subscribe) {
+			console.log("closing subscribe", id)
+			await subscribe.close(0x4n, "migrating to new connection")
+			this.#subscribe.delete(id)
+		}
 	}
 
 	async migrationDone(control: ControlStream, objects: Objects) {
@@ -166,7 +171,7 @@ export class Publisher {
 		if (!subscribe) {
 			throw new Error(`unsubscribe for unknown subscribe: ${msg.id}`)
 		}
-		subscribe.close({ unsubscribe: false })
+		subscribe.close()
 		this.#subscribe.delete(msg.id)
 	}
 }
@@ -276,7 +281,7 @@ export class SubscribeRecv {
 	}
 
 	// Close the subscription with an error.
-	async close({ code = 0n, reason = "", unsubscribe = true }: { code?: bigint; reason?: string; unsubscribe?: boolean }) {
+	async close(code = 0n, reason = "") {
 		if (this.#state === "closed") return
 		const acked = this.#state === "ack"
 		this.#state = "closed"
@@ -287,12 +292,15 @@ export class SubscribeRecv {
 				message: { id: this.#id, code, reason }
 			})
 		}
-		if (unsubscribe) {
-			return this.#control.send({
-				type: Control.ControlMessageType.Unsubscribe,
-				message: { id: this.#id }
-			})
-		}
+		return this.#control.send({
+			type: Control.ControlMessageType.PublishDone,
+			message: {
+				id: this.#id,
+				code,
+				reason,
+				stream_count: 0n, // FIXME(itzmanish): correctly reflect active stream count
+			}
+		})
 	}
 
 	// Create a writable data stream for the entire track (using datagrams)

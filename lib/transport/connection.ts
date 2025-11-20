@@ -41,7 +41,7 @@ export class Connection {
 	}
 
 	// Callback, should be set when creating connection in the client
-	onMigration: (sessionUri?: string) => Promise<{ quic: WebTransport, control: ControlStream, objects: Objects }> = async () => {
+	onMigration: (sessionUri?: string) => Promise<void> = async () => {
 		throw new Error("not implemented")
 	}
 
@@ -57,13 +57,15 @@ export class Connection {
 		await Promise.all([this.#runControl(), this.#runObjects()])
 	}
 
-	async goaway(sessionUri?: string) {
-		await this.#controlStream.send({
-			type: Control.ControlMessageType.GoAway,
-			message: {
-				session_uri: sessionUri || "",
-			},
-		})
+	async closePublisher(sendGoAway: boolean = true) {
+		if (sendGoAway) {
+			await this.#controlStream.send({
+				type: Control.ControlMessageType.GoAway,
+				message: {
+					session_uri: "",
+				},
+			})
+		}
 		this.#migrationState = "going_away"
 		this.#subscriber.migrationState = "going_away"
 		this.#publisher.migrationState = "going_away"
@@ -101,9 +103,14 @@ export class Connection {
 			console.log("starting control loop")
 			for (; ;) {
 				const msg = await this.#controlStream.recv()
+				console.log("control loop got msg", msg)
 				await this.#recv(msg)
 			}
-		} catch (e) {
+		} catch (e: any) {
+			if (e.message === "close()") {
+				console.warn("closing the connection: ", e)
+				return
+			}
 			console.error("Error in control stream:", e)
 			throw e
 		}
@@ -119,7 +126,11 @@ export class Connection {
 
 				await this.#subscriber.recvObject(obj)
 			}
-		} catch (e) {
+		} catch (e: any) {
+			if (e.message === "close()") {
+				console.warn("closing the connection: ", e)
+				return
+			}
 			console.error("Error in object stream:", e)
 			throw e
 		}
@@ -127,7 +138,7 @@ export class Connection {
 
 	async #recv(msg: Control.MessageWithType) {
 		if (msg.type === Control.ControlMessageType.GoAway) {
-			await this.#handleGoAway(msg.message)
+			this.#handleGoAway(msg.message)
 		} else if (msg.type === Control.ControlMessageType.MaxRequestId) {
 			await this.#handleMaxRequestId(msg.message)
 		} else if (Control.isPublisher(msg.type)) {
@@ -150,23 +161,25 @@ export class Connection {
 		await this.#subscriber.startMigration()
 		await this.#publisher.startMigration()
 
-		// FIXME(itzmanish): is this how we close the quic connection for go_away?
-		this.#quic.close({ closeCode: 0, reason: "going_away" })
+		while (this.#publisher.activeSubscribersCount > 0 || this.#subscriber.activeSubscribersCount > 0) {
+			await sleep(100)
+		}
+		console.log("active subscribers count", this.#publisher.activeSubscribersCount, this.#subscriber.activeSubscribersCount)
 
-		const { quic, control, objects } = await this.onMigration(msg.session_uri)
-		this.#quic = quic
-		this.#controlStream = control
-		this.#objects = objects
 		this.#migrationState = "done"
-
-		await this.#publisher.migrationDone(control, objects)
-		await this.#subscriber.migrationDone(control, objects)
+		this.onMigration(msg.session_uri)
+		console.log("should close the quic session now ")
 	}
 
 	async migrateSession(quic: WebTransport, control: ControlStream, objects: Objects) {
 		this.#quic = quic
 		this.#controlStream = control
 		this.#objects = objects
+
+		await this.#publisher.migrationDone(control, objects)
+		await this.#subscriber.migrationDone(control, objects)
+
+		this.#running = this.#run()
 	}
 
 	async closed(): Promise<Error> {

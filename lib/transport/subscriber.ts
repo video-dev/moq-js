@@ -17,7 +17,6 @@ export class Subscriber {
 	#control: ControlStream
 
 	#migrationState: MigrationState = "none"
-	#tracksToMigrate = new Set<[string[], string]>()
 
 	// Use to send objects.
 	#objects: Objects
@@ -29,7 +28,6 @@ export class Subscriber {
 	// Our subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeSend>()
 	#trackToIDMap = new Map<string, bigint>()
-	#trackAliasMap = new Map<bigint, bigint>() // Maps request ID to track alias
 	#aliasToSubscriptionMap = new Map<bigint, bigint>() // Maps track alias to subscription ID
 	#pendingTrack = new Map<bigint, (id: bigint) => Promise<void>>()
 
@@ -42,6 +40,10 @@ export class Subscriber {
 		return this.#publishedNamespacesQueue
 	}
 
+	get activeSubscribersCount() {
+		return this.#subscribe.size
+	}
+
 	get migrationState() {
 		return this.#migrationState
 	}
@@ -52,20 +54,15 @@ export class Subscriber {
 
 	async startMigration() {
 		this.migrationState = "in_progress"
-		// close all the subscription
-		this.#trackToIDMap.forEach(async (id, track) => {
+		for (const [track, id] of this.#trackToIDMap) {
 			await this.unsubscribe(track, true);
-		})
+		}
 	}
 
 	async migrationDone(control: ControlStream, objects: Objects) {
 		this.migrationState = "done"
 		this.#control = control
 		this.#objects = objects
-		this.#tracksToMigrate.forEach(async (track) => {
-			await this.subscribe(track[0], track[1]);
-		})
-		this.#tracksToMigrate.clear()
 	}
 
 	async recv(msg: Control.MessageWithType) {
@@ -112,7 +109,7 @@ export class Subscriber {
 	}
 
 	async subscribe_namespace(namespace: string[]) {
-		if (this.migrationState !== "none") {
+		if (this.migrationState === "in_progress" || this.migrationState === "going_away") {
 			throw new Error(`migration in progress or going away`)
 		}
 		const id = this.#control.nextRequestId()
@@ -127,7 +124,7 @@ export class Subscriber {
 	}
 
 	async subscribe(namespace: string[], track: string) {
-		if (this.migrationState !== "none") {
+		if (this.migrationState === "in_progress" || this.migrationState === "going_away") {
 			throw new Error(`migration in progress or going away`)
 		}
 		const id = this.#control.nextRequestId()
@@ -168,10 +165,9 @@ export class Subscriber {
 		try {
 			const subscription = this.#subscribe.get(trackID)
 			if (subscription) {
-				this.#subscribe.delete(trackID)
-				await subscription.close()
-				if (isMigrating) {
-					this.#tracksToMigrate.add([subscription.namespace, track])
+				const canBeDeleted = await subscription.close()
+				if (canBeDeleted) {
+					this.#subscribe.delete(trackID)
 				}
 			}
 			this.#trackToIDMap.delete(track)
@@ -188,8 +184,6 @@ export class Subscriber {
 			throw new Error(`subscribe ok for unknown id: ${msg.id}`)
 		}
 
-		// Store the track alias provided by the publisher
-		this.#trackAliasMap.set(msg.id, msg.track_alias)
 		// Also create reverse mapping for receiving objects
 		this.#aliasToSubscriptionMap.set(msg.track_alias, msg.id)
 		const callback = this.#pendingTrack.get(msg.track_alias)
@@ -208,6 +202,9 @@ export class Subscriber {
 			throw new Error(`subscribe error for unknown id: ${msg.id}`)
 		}
 
+		this.#subscribe.delete(msg.id)
+		this.#trackToIDMap.delete(subscribe.track)
+
 		await subscribe.onError(msg.code, msg.reason)
 	}
 
@@ -216,6 +213,9 @@ export class Subscriber {
 		if (!subscribe) {
 			throw new Error(`publish done for unknown id: ${msg.id}`)
 		}
+
+		this.#subscribe.delete(msg.id)
+		this.#trackToIDMap.delete(subscribe.track)
 
 		await subscribe.onDone(msg.code, msg.stream_count, msg.reason)
 	}
@@ -288,6 +288,8 @@ export class SubscribeSend {
 	#control: ControlStream
 	#id: bigint
 	#trackAlias?: bigint // Set when SUBSCRIBE_OK is received
+	#closed: boolean = false
+
 
 	readonly namespace: string[]
 	readonly track: string
@@ -306,11 +308,18 @@ export class SubscribeSend {
 		return this.#trackAlias
 	}
 
-	async close(_code = 0n, _reason = "") {
-		this.#control.send({
+	// sends unsubscribe message if the track alias is set
+	// and returns false otherwise true, which means subscription can be
+	// deleted
+	async close(_code = 0n, _reason = ""): Promise<boolean> {
+		if (this.#closed) return true
+		this.#closed = true
+		if (this.#trackAlias === undefined) return true
+		await this.#control.send({
 			type: Control.ControlMessageType.Unsubscribe,
 			message: { id: this.#id }
 		})
+		return false
 	}
 
 	onOk(trackAlias: bigint) {
@@ -318,9 +327,9 @@ export class SubscribeSend {
 		this.#trackAlias = trackAlias
 	}
 
-	// FIXME(itzmanish): implement correctly 
+	// FIXME(itzmanish): implement correctly
 	async onDone(code: bigint, streamCount: bigint, reason: string) {
-		throw new Error(`TODO onDone`)
+		console.warn("subscriber done, ID:", this.#id, "code", code, "streamCount", streamCount, reason)
 	}
 
 	async onError(code: bigint, reason: string) {

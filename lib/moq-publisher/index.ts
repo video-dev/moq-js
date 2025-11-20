@@ -120,78 +120,97 @@ export class PublisherMoq extends HTMLElement {
 
 	private async handleClick() {
 		if (!this.isPublishing) {
-			if (!this.mediaStream) {
-				console.warn("No media stream available")
-				return
-			}
-
-			this.namespace = this.getAttribute("namespace") ?? crypto.randomUUID()
-
-			const audioTrack = this.mediaStream.getAudioTracks()[0]
-			const settings = audioTrack.getSettings()
-
-			const sampleRate = settings.sampleRate ?? (await new AudioContext()).sampleRate
-			const numberOfChannels = settings.channelCount ?? 2
-
-			// H.264 requires even dimensions - round down to nearest even number
-			const makeEven = (n: number) => Math.floor(n / 2) * 2
-			const width = makeEven(this.previewVideo.videoWidth)
-			const height = makeEven(this.previewVideo.videoHeight)
-
-			const videoConfig: VideoEncoderConfig = {
-				codec: "avc1.42E01E",
-				width,
-				height,
-				bitrate: 1000000,
-				framerate: 30,
-			}
-			const audioConfig: AudioEncoderConfig = { codec: "opus", sampleRate, numberOfChannels, bitrate: 64000 }
-
-			const opts: PublisherOptions = {
-				url: this.getAttribute("src")!,
-				fingerprintUrl: this.getAttribute("fingerprint") ?? undefined,
-				namespace: [this.namespace],
-				media: this.mediaStream,
-				video: videoConfig,
-				audio: audioConfig,
-			}
-
-			console.log("Publisher Options", opts)
-
-			this.publisher = new PublisherApi(opts)
-
-			try {
-				await this.publisher.publish()
-				this.isPublishing = true
-				this.connectButton.textContent = "Stop"
-				this.cameraSelect.disabled = true
-				this.microphoneSelect.disabled = true
-
-				const playbackBaseUrl = this.getAttribute("playbackbaseurl")
-				if (playbackBaseUrl) {
-					this.playbackUrlTextarea.value = `${playbackBaseUrl}${this.namespace}`
-				} else {
-					this.playbackUrlTextarea.value = this.namespace
-				}
-				this.playbackUrlTextarea.style.display = "block"
-			} catch (err) {
-				console.error("Publish failed:", err)
-			}
+			return this.startPublishing()
 		} else {
-			try {
-				await this.publisher!.stop()
-			} catch (err) {
-				console.error("Stop failed:", err)
-			} finally {
-				this.isPublishing = false
-				this.connectButton.textContent = "Connect"
-				this.cameraSelect.disabled = false
-				this.microphoneSelect.disabled = false
-				this.playbackUrlTextarea.style.display = "none"
-			}
+			return this.stopPublishing()
 		}
 	}
-}
 
+	private async startPublishing(uri?: string) {
+		if (!this.mediaStream) {
+			console.warn("No media stream available")
+			return
+		}
+
+		this.namespace = this.getAttribute("namespace") ?? crypto.randomUUID()
+
+		const audioTrack = this.mediaStream.getAudioTracks()[0]
+		const settings = audioTrack.getSettings()
+
+		const sampleRate = settings.sampleRate ?? (await new AudioContext()).sampleRate
+		const numberOfChannels = settings.channelCount ?? 2
+
+		// H.264 requires even dimensions - round down to nearest even number
+		const makeEven = (n: number) => Math.floor(n / 2) * 2
+		const width = makeEven(this.previewVideo.videoWidth)
+		const height = makeEven(this.previewVideo.videoHeight)
+
+		const videoConfig: VideoEncoderConfig = {
+			codec: "avc1.42E01E",
+			width,
+			height,
+			bitrate: 1000000,
+			framerate: 30,
+		}
+		const audioConfig: AudioEncoderConfig = { codec: "opus", sampleRate, numberOfChannels, bitrate: 64000 }
+
+		const opts: PublisherOptions = {
+			url: uri ?? this.getAttribute("src")!,
+			fingerprintUrl: this.getAttribute("fingerprint") ?? undefined,
+			namespace: [this.namespace],
+			media: this.mediaStream,
+			video: videoConfig,
+			audio: audioConfig,
+		}
+
+		console.log("Publisher Options", opts)
+
+		this.publisher = new PublisherApi(opts)
+
+		this.publisher.addEventListener("reconnect", ((event: CustomEvent) => {
+			console.log("[PublisherApi] Reconnect event received:", event.detail)
+			this.handleReconnect(event.detail?.uri)
+		}) as EventListener)
+
+		Object.assign(window, { publisher: this.publisher })
+
+		try {
+			await this.publisher.publish()
+			this.isPublishing = true
+			this.connectButton.textContent = "Stop"
+			this.cameraSelect.disabled = true
+			this.microphoneSelect.disabled = true
+
+			const playbackBaseUrl = this.getAttribute("playbackbaseurl")
+			if (playbackBaseUrl) {
+				this.playbackUrlTextarea.value = `${playbackBaseUrl}${this.namespace}`
+			} else {
+				this.playbackUrlTextarea.value = this.namespace
+			}
+			this.playbackUrlTextarea.style.display = "block"
+		} catch (err) {
+			console.error("Publish failed:", err)
+		}
+	}
+
+	private async stopPublishing(graceful: boolean = false) {
+		try {
+			await this.publisher!.stop(graceful)
+		} catch (err) {
+			console.error("Stop failed:", err)
+		} finally {
+			this.isPublishing = false
+			this.connectButton.textContent = "Connect"
+			this.cameraSelect.disabled = false
+			this.microphoneSelect.disabled = false
+			this.playbackUrlTextarea.style.display = "none"
+		}
+	}
+
+	private async handleReconnect(uri: string) {
+		await this.stopPublishing(true)
+		await this.startPublishing(uri)
+	}
+}
 customElements.define("publisher-moq", PublisherMoq)
 export default PublisherMoq

@@ -63,7 +63,12 @@ export default class Player extends EventTarget {
 		})
 
 		// Async work
-		this.#running = abort.catch(this.#close)
+		this.#running = new Promise((_, rej) => {
+			abort.catch((e) => {
+				this.#close()
+				rej(e)
+			})
+		})
 
 		this.#run().catch((err) => {
 			console.error("Error in #run():", err)
@@ -81,7 +86,12 @@ export default class Player extends EventTarget {
 
 		const canvas = config.canvas.transferControlToOffscreen()
 
-		return new Player(connection, catalog as any, tracknum, canvas)
+		const player = new Player(connection, catalog as any, tracknum, canvas)
+		connection.onMigration = async (sessionUri) => {
+			console.log("dispatching reconnect event")
+			player.dispatchEvent(new CustomEvent("reconnect", { detail: { uri: sessionUri } }))
+		}
+		return player
 	}
 
 	async #run() {
@@ -155,8 +165,9 @@ export default class Player extends EventTarget {
 		try {
 			console.log("starting segment data loop")
 			for (; ;) {
-				console.log("waiting for segment data")
+				console.log("waiting for segment data", this.#running)
 				const segment = await Promise.race([sub.data(), this.#running])
+
 				if (!segment) continue
 
 				if (!(segment instanceof SubgroupReader)) {

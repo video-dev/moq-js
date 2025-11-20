@@ -71,8 +71,8 @@ export async function fetch(connection: Connection, namespace: string[]) {
 		console.error("Catalog fetch error: ", e)
 		const err = asError(e)
 
-		// // Close the subscription after we're done.
-		// await subscribe.close(1n, err.message)
+		// Close the subscription after we're done.
+		await subscribe.close(1n, err.message)
 
 		throw err
 	}

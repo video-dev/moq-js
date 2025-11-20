@@ -209,10 +209,12 @@ export class VideoMoq extends HTMLElement {
 		}
 	}
 
-	private load() {
-		this.destroy().catch((error) => {
+	private async load(reload: boolean = false) {
+		await this.destroy(reload).catch((error) => {
 			console.error("Error while destroying:", error)
 		})
+
+		console.log("creating player:", this.src)
 
 		this.shadow.innerHTML = /*html*/ `
 			<style>${STYLE_SHEET}</style>
@@ -238,14 +240,26 @@ export class VideoMoq extends HTMLElement {
 		const fingerprint = urlParams.get("fingerprint") || this.getAttribute("fingerprint")
 
 		// TODO: Unsure if fingerprint should be optional
-		if (namespace === null) return
+		if (namespace === null) {
+			this.fail(new Error("No 'namespace' attribute provided for <video-moq>"))
+			return
+		}
 
 		const trackNumStr = urlParams.get("trackNum") || this.trackNum
 		const trackNum: number = this.auxParseInt(trackNumStr, 0)
-		Player.create(
+		const player = await Player.create(
 			{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
 			trackNum,
 		)
+		player.addEventListener("reconnect", ((event: CustomEvent) => {
+			console.log("[VideoMoq] Reconnect event received:", event.detail, this.src)
+			if (event.detail?.uri && event.detail.uri !== "") {
+				this.src = `${event.detail.uri}?namespace=${namespace}`
+			}
+			this.load(true)
+		}) as EventListener)
+
+		this.setPlayer(player)
 
 		if (this.controls !== null) {
 			const controlsElement = document.createElement("div")
@@ -317,7 +331,7 @@ export class VideoMoq extends HTMLElement {
 		}
 	}
 
-	private async destroy() {
+	private async destroy(reload: boolean = false) {
 		this.#canvas?.removeEventListener("click", this.playPauseEventHandler)
 		this.#playButton?.removeEventListener("click", this.playPauseEventHandler)
 
@@ -336,8 +350,16 @@ export class VideoMoq extends HTMLElement {
 		document.removeEventListener("keydown", this.toggleFullscreenEventHandler)
 		document.removeEventListener("fullscreenchange", () => this.onFullscreenChange())
 
-		if (!this.player) return
-		await this.player.close()
+		console.log("destroying player")
+		if (!this.player) {
+			console.log("player is null")
+			return
+		}
+		if (reload) {
+			this.player.close(new Error("cancelled"))
+		} else {
+			await this.player.close()
+		}
 		this.player = null
 	}
 

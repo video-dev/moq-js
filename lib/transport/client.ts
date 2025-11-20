@@ -73,7 +73,6 @@ export class Client {
 		const quic = await this.createQuic(sessionUri)
 		const { control, objects } = await this.prepareConnection(quic)
 		const conn = new Connection(quic, control, objects)
-		conn.onMigration = this.migrateSession.bind(this)
 		return conn
 	}
 
