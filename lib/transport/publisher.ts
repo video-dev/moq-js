@@ -48,11 +48,6 @@ export class Publisher {
 
 	async startMigration() {
 		this.migrationState = "in_progress"
-		for (const [id, subscribe] of this.#subscribe) {
-			console.log("closing subscribe", id)
-			await subscribe.close(0x4n, "migrating to new connection")
-			this.#subscribe.delete(id)
-		}
 	}
 
 	async migrationDone(control: ControlStream, objects: Objects) {

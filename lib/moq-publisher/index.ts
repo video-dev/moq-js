@@ -190,6 +190,7 @@ export class PublisherMoq extends HTMLElement {
 			this.playbackUrlTextarea.style.display = "block"
 		} catch (err) {
 			console.error("Publish failed:", err)
+			this.mediaStream.getTracks().forEach((t) => t.stop())
 		}
 	}
 

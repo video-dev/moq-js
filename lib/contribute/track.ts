@@ -114,6 +114,10 @@ export class Track {
 		writer.releaseLock()
 	}
 
+	async close(e?: Error) {
+		return this.#close(e)
+	}
+
 	async #close(e?: Error) {
 		this.#error = e
 

@@ -243,6 +243,9 @@ export class Broadcast {
 
 	async close(isGoingAway: boolean = false) {
 		const notGoingAway = !isGoingAway
+		for (const track of this.#tracks.values()) {
+			await track.close()
+		}
 		await this.connection.closePublisher(notGoingAway)
 	}
 

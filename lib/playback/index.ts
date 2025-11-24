@@ -334,7 +334,13 @@ export default class Player extends EventTarget {
 		if (err) this.#abort(err)
 		else this.#close()
 
-		if (this.#connection) this.#connection.close()
+		if (this.#connection) {
+			if (err?.message === "cancelled") {
+				this.#connection.close(0x4, "going away")
+			} else {
+				this.#connection.close()
+			}
+		}
 		if (this.#backend) await this.#backend.close()
 	}
 

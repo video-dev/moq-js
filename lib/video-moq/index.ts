@@ -247,19 +247,24 @@ export class VideoMoq extends HTMLElement {
 
 		const trackNumStr = urlParams.get("trackNum") || this.trackNum
 		const trackNum: number = this.auxParseInt(trackNumStr, 0)
-		const player = await Player.create(
-			{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
-			trackNum,
-		)
-		player.addEventListener("reconnect", ((event: CustomEvent) => {
-			console.log("[VideoMoq] Reconnect event received:", event.detail, this.src)
-			if (event.detail?.uri && event.detail.uri !== "") {
-				this.src = `${event.detail.uri}?namespace=${namespace}`
-			}
-			this.load(true)
-		}) as EventListener)
+		try {
+			const player = await Player.create(
+				{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
+				trackNum,
+			)
+			player.addEventListener("reconnect", ((event: CustomEvent) => {
+				console.log("[VideoMoq] Reconnect event received:", event.detail, this.src)
+				if (event.detail?.uri && event.detail.uri !== "") {
+					this.src = `${event.detail.uri}?namespace=${namespace}`
+				}
+				this.load(true)
+			}) as EventListener)
 
-		this.setPlayer(player)
+			this.setPlayer(player)
+		} catch (error) {
+			this.fail(error as Error)
+		}
+
 
 		if (this.controls !== null) {
 			const controlsElement = document.createElement("div")

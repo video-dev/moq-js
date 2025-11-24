@@ -161,7 +161,7 @@ export class Connection {
 		await this.#subscriber.startMigration()
 		await this.#publisher.startMigration()
 
-		while (this.#publisher.activeSubscribersCount > 0 || this.#subscriber.activeSubscribersCount > 0) {
+		while (this.#subscriber.activeSubscribersCount > 0) {
 			await sleep(100)
 		}
 		console.log("active subscribers count", this.#publisher.activeSubscribersCount, this.#subscriber.activeSubscribersCount)
