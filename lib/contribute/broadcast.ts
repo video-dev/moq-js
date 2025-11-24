@@ -5,6 +5,7 @@ import { Track } from "./track"
 import * as Catalog from "../media/catalog"
 
 import { isAudioTrackSettings, isVideoTrackSettings } from "../common/settings"
+import { sleep } from "../transport/utils"
 
 export interface BroadcastConfig {
 	namespace: string[]
@@ -37,11 +38,24 @@ export class Broadcast {
 
 		const tracks: Catalog.Track[] = []
 
-		for (const media of this.config.media.getTracks()) {
+		const mediaTracks = this.config.media.getTracks()
+		for (const media of mediaTracks) {
 			const track = new Track(media, config)
 			this.#tracks.set(track.name, track)
 
 			const settings = media.getSettings()
+
+			if (media.kind === "audio") {
+				const audioContext = new AudioContext();
+				audioContext.createMediaStreamSource(new MediaStream([media]))
+				const sampleRate = audioContext.sampleRate
+				Object.assign(settings, {
+					sampleRate,
+				})
+				audioContext.close()
+			}
+
+			console.log("track settings", settings, media, mediaTracks)
 
 			if (isVideoTrackSettings(settings)) {
 				if (!config.video) {
@@ -73,7 +87,7 @@ export class Broadcast {
 					name: `${track.name}.m4s`,
 					initTrack: `${track.name}.mp4`,
 					selectionParams: {
-						mimeType: "audio/ogg",
+						mimeType: "audio/mp4",
 						codec: config.audio.codec,
 						samplerate: settings.sampleRate,
 						//sampleSize: settings.sampleSize,
@@ -104,9 +118,10 @@ export class Broadcast {
 	}
 
 	async #run() {
-		await this.connection.announce(this.namespace)
+		console.log("[Broadcast] #run loop started")
+		await this.connection.publish_namespace(this.namespace)
 
-		for (;;) {
+		for (; ;) {
 			const subscriber = await this.connection.subscribed()
 			if (!subscriber) break
 
@@ -121,6 +136,7 @@ export class Broadcast {
 	async #serveSubscribe(subscriber: SubscribeRecv) {
 		try {
 			const [base, ext] = splitExt(subscriber.track)
+			console.log("serving subscribe", subscriber.track, subscriber.namespace, base, ext)
 			if (ext === "catalog") {
 				await this.#serveCatalog(subscriber, base)
 			} else if (ext === "mp4") {
@@ -131,8 +147,10 @@ export class Broadcast {
 				throw new Error(`unknown subscription: ${subscriber.track}`)
 			}
 		} catch (e) {
+			console.error("failed to serve subscribe", e)
 			const err = asError(e)
-			await subscriber.close(1n, `failed to process subscribe: ${err.message}`)
+			// TODO(itzmanish): should check if the error is not found and send appropriate error code
+			await subscriber.close(0n, `failed to process subscribe: ${err.message}`)
 		} finally {
 			// TODO we can't close subscribers because there's no support for clean termination
 			// await subscriber.close()
@@ -145,11 +163,11 @@ export class Broadcast {
 
 		const bytes = Catalog.encode(this.catalog)
 
-		// Send a SUBSCRIBE_OK
 		await subscriber.ack()
+		await sleep(500);
 
 		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
-		await stream.write({ object: 0, payload: bytes })
+		await stream.write({ object_id: 0, object_payload: bytes })
 		await stream.close()
 	}
 
@@ -157,13 +175,13 @@ export class Broadcast {
 		const track = this.#tracks.get(name)
 		if (!track) throw new Error(`no track with name ${subscriber.track}`)
 
-		// Send a SUBSCRIBE_OK
 		await subscriber.ack()
+		await sleep(500);
 
 		const init = await track.init()
 
 		const stream = await subscriber.subgroup({ group: 0, subgroup: 0 })
-		await stream.write({ object: 0, payload: init })
+		await stream.write({ object_id: 0, object_payload: init })
 		await stream.close()
 	}
 
@@ -174,9 +192,12 @@ export class Broadcast {
 		// Send a SUBSCRIBE_OK
 		await subscriber.ack()
 
+		// NOTE(itzmanish): hack to make sure subscribe ok reaches before the segement object
+		await sleep(500);
+
 		const segments = track.segments().getReader()
 
-		for (;;) {
+		for (; ;) {
 			const { value: segment, done } = await segments.read()
 			if (done) break
 
@@ -200,13 +221,13 @@ export class Broadcast {
 
 		// Pipe the segment to the stream.
 		const chunks = segment.chunks().getReader()
-		for (;;) {
+		for (; ;) {
 			const { value, done } = await chunks.read()
 			if (done) break
 
 			await stream.write({
-				object,
-				payload: value,
+				object_id: object,
+				object_payload: value,
 			})
 
 			object += 1
@@ -220,8 +241,12 @@ export class Broadcast {
 		video.srcObject = this.config.media
 	}
 
-	close() {
-		// TODO implement publish close
+	async close(isGoingAway: boolean = false) {
+		const notGoingAway = !isGoingAway
+		for (const track of this.#tracks.values()) {
+			await track.close()
+		}
+		await this.connection.closePublisher(notGoingAway)
 	}
 
 	// Returns the error message when the connection is closed

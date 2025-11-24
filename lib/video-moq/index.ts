@@ -209,10 +209,12 @@ export class VideoMoq extends HTMLElement {
 		}
 	}
 
-	private load() {
-		this.destroy().catch((error) => {
+	private async load(reload: boolean = false) {
+		await this.destroy(reload).catch((error) => {
 			console.error("Error while destroying:", error)
 		})
+
+		console.log("creating player:", this.src)
 
 		this.shadow.innerHTML = /*html*/ `
 			<style>${STYLE_SHEET}</style>
@@ -238,13 +240,31 @@ export class VideoMoq extends HTMLElement {
 		const fingerprint = urlParams.get("fingerprint") || this.getAttribute("fingerprint")
 
 		// TODO: Unsure if fingerprint should be optional
-		if (namespace === null || fingerprint === null) return
+		if (namespace === null) {
+			this.fail(new Error("No 'namespace' attribute provided for <video-moq>"))
+			return
+		}
 
 		const trackNumStr = urlParams.get("trackNum") || this.trackNum
 		const trackNum: number = this.auxParseInt(trackNumStr, 0)
-		Player.create({ url: url.origin, fingerprint, canvas: this.#canvas, namespace }, trackNum)
-			.then((player) => this.setPlayer(player))
-			.catch((e) => this.fail(e))
+		try {
+			const player = await Player.create(
+				{ url: url.origin, fingerprint: fingerprint ?? undefined, canvas: this.#canvas, namespace },
+				trackNum,
+			)
+			player.addEventListener("reconnect", ((event: CustomEvent) => {
+				console.log("[VideoMoq] Reconnect event received:", event.detail, this.src)
+				if (event.detail?.uri && event.detail.uri !== "") {
+					this.src = `${event.detail.uri}?namespace=${namespace}`
+				}
+				this.load(true)
+			}) as EventListener)
+
+			this.setPlayer(player)
+		} catch (error) {
+			this.fail(error as Error)
+		}
+
 
 		if (this.controls !== null) {
 			const controlsElement = document.createElement("div")
@@ -316,7 +336,7 @@ export class VideoMoq extends HTMLElement {
 		}
 	}
 
-	private async destroy() {
+	private async destroy(reload: boolean = false) {
 		this.#canvas?.removeEventListener("click", this.playPauseEventHandler)
 		this.#playButton?.removeEventListener("click", this.playPauseEventHandler)
 
@@ -335,8 +355,16 @@ export class VideoMoq extends HTMLElement {
 		document.removeEventListener("keydown", this.toggleFullscreenEventHandler)
 		document.removeEventListener("fullscreenchange", () => this.onFullscreenChange())
 
-		if (!this.player) return
-		await this.player.close()
+		console.log("destroying player")
+		if (!this.player) {
+			console.log("player is null")
+			return
+		}
+		if (reload) {
+			this.player.close(new Error("cancelled"))
+		} else {
+			await this.player.close()
+		}
 		this.player = null
 	}
 
@@ -377,20 +405,20 @@ export class VideoMoq extends HTMLElement {
 	public play(): Promise<void> {
 		return this.player
 			? this.player.play().then(() => {
-					if (!this.#playButton) return
-					this.#playButton.innerHTML = PAUSE_SVG
-					this.#playButton.ariaLabel = "Pause"
-				})
+				if (!this.#playButton) return
+				this.#playButton.innerHTML = PAUSE_SVG
+				this.#playButton.ariaLabel = "Pause"
+			})
 			: Promise.resolve()
 	}
 
 	public pause(): Promise<void> {
 		return this.player
 			? this.player.pause().then(() => {
-					if (!this.#playButton) return
-					this.#playButton.innerHTML = PLAY_SVG
-					this.#playButton.ariaLabel = "Play"
-				})
+				if (!this.#playButton) return
+				this.#playButton.innerHTML = PLAY_SVG
+				this.#playButton.ariaLabel = "Play"
+			})
 			: Promise.resolve()
 	}
 
@@ -419,23 +447,23 @@ export class VideoMoq extends HTMLElement {
 	public unmute(): Promise<void> {
 		return this.player
 			? this.player.mute(false).then(() => {
-					if (!this.#volumeButton) return
-					this.#volumeButton.ariaLabel = "Mute"
-					this.#volumeButton.innerText = "🔊"
-					this.#volumeRange!.value = this.previousVolume.toString()
-				})
+				if (!this.#volumeButton) return
+				this.#volumeButton.ariaLabel = "Mute"
+				this.#volumeButton.innerText = "🔊"
+				this.#volumeRange!.value = this.previousVolume.toString()
+			})
 			: Promise.resolve()
 	}
 
 	public mute(): Promise<void> {
 		return this.player
 			? this.player.mute(true).then(() => {
-					if (!this.#volumeButton) return
-					this.#volumeButton.ariaLabel = "Unmute"
-					this.#volumeButton.innerText = "🔇"
-					this.previousVolume = parseFloat(this.#volumeRange!.value)
-					this.#volumeRange!.value = "0"
-				})
+				if (!this.#volumeButton) return
+				this.#volumeButton.ariaLabel = "Unmute"
+				this.#volumeButton.innerText = "🔇"
+				this.previousVolume = parseFloat(this.#volumeRange!.value)
+				this.#volumeRange!.value = "0"
+			})
 			: Promise.resolve()
 	}
 
@@ -693,7 +721,6 @@ export class VideoMoq extends HTMLElement {
 		}
 	}
 }
-
 // Register the custom element
 customElements.define("video-moq", VideoMoq)
 export default VideoMoq

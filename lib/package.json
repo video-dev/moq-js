@@ -4,8 +4,11 @@
 	"description": "Media over QUIC library",
 	"license": "(MIT OR Apache-2.0)",
 	"wc-player": "video-moq/index.ts",
+	"wc-publisher": "moq-publisher/index.ts",
 	"simple-player": "playback/index.ts",
-	"files": ["dist"],
+	"files": [
+		"dist"
+	],
 	"exports": {
 		".": {
 			"import": "./dist/moq-player.esm.js",
@@ -14,10 +17,15 @@
 		"./simple-player": {
 			"import": "./dist/moq-simple-player.esm.js",
 			"require": "./dist/moq-simple-player.cjs.js"
+		},
+		"./moq-publisher": {
+			"import": "./dist/moq-publisher.esm.js",
+			"require": "./dist/moq-publisher.cjs.js"
 		}
 	},
 	"iife": "dist/moq-player.iife.js",
 	"iife-simple": "dist/moq-simple-player.iife.js",
+	"iife-publisher": "dist/moq-publisher.iife.js",
 	"types": "dist/types/moq-player.d.ts",
 	"scripts": {
 		"build": "rollup -c",
@@ -58,8 +66,18 @@
 		"mp4box": "^0.5.2"
 	},
 	"browserslist": {
-		"production": ["chrome >= 97", "edge >= 98", "firefox >= 130", "opera >= 83", "safari >= 18"],
-		"development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+		"production": [
+			"chrome >= 97",
+			"edge >= 98",
+			"firefox >= 130",
+			"opera >= 83",
+			"safari >= 18"
+		],
+		"development": [
+			"last 1 chrome version",
+			"last 1 firefox version",
+			"last 1 safari version"
+		]
 	},
 	"repository": {
 		"type": "git",

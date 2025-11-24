@@ -1,5 +1,6 @@
 import { Connection } from "../../transport"
 import { asError } from "../../common/error"
+import { debug } from "../../transport/utils"
 
 export interface CommonTrackFields {
 	namespace?: string[]
@@ -46,20 +47,23 @@ export function decode(raw: Uint8Array): Root {
 	return catalog
 }
 
-export async function fetch(connection: Connection, namespace: string[]): Promise<Root> {
+export async function fetch(connection: Connection, namespace: string[]) {
 	const subscribe = await connection.subscribe(namespace, ".catalog")
 	try {
+		debug("catalog subscribe", subscribe)
 		const segment = await subscribe.data()
 		if (!segment) throw new Error("no catalog data")
 
+		console.log("catalog segment", segment)
 		const chunk = await segment.read()
 		if (!chunk) throw new Error("no catalog chunk")
 
+		console.log("catalog chunk", chunk)
 		await segment.close()
 		await subscribe.close() // we done
 
-		if (chunk.payload instanceof Uint8Array) {
-			return decode(chunk.payload)
+		if (chunk.object_payload instanceof Uint8Array) {
+			return decode(chunk.object_payload)
 		} else {
 			throw new Error("invalid catalog chunk")
 		}

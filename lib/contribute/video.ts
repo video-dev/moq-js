@@ -63,6 +63,8 @@ export class Encoder {
 			},
 		})
 
+		console.log("Encoder configured", this.#encoderConfig)
+
 		this.#encoder.configure(this.#encoderConfig)
 	}
 

@@ -45,7 +45,14 @@ export class Track {
 			abort: (e) => this.#close(e),
 		})
 
-		return source.readable.pipeThrough(encoder.frames).pipeThrough(container.encode).pipeTo(segments)
+		return source.readable
+			.pipeThrough(encoder.frames)
+			.pipeThrough(container.encode)
+			.pipeTo(segments)
+			.catch((err) => {
+				console.error("Audio pipeline error:", err)
+				throw err
+			})
 	}
 
 	async #runVideo(track: MediaStreamVideoTrack, config: VideoEncoderConfig) {
@@ -107,6 +114,10 @@ export class Track {
 		writer.releaseLock()
 	}
 
+	async close(e?: Error) {
+		return this.#close(e)
+	}
+
 	async #close(e?: Error) {
 		this.#error = e
 
@@ -134,7 +145,7 @@ export class Track {
 
 		return new ReadableStream({
 			pull: async (controller) => {
-				for (;;) {
+				for (; ;) {
 					let index = pos - this.#offset
 					if (index < 0) index = 0
 

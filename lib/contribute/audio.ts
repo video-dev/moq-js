@@ -22,20 +22,30 @@ export class Encoder {
 	}
 
 	#start(controller: TransformStreamDefaultController<AudioDecoderConfig | EncodedAudioChunk>) {
-		this.#encoder = new AudioEncoder({
-			output: (frame, metadata) => {
-				this.#enqueue(controller, frame, metadata)
-			},
-			error: (err) => {
-				throw err
-			},
-		})
+		try {
+			this.#encoder = new AudioEncoder({
+				output: (frame, metadata) => {
+					this.#enqueue(controller, frame, metadata)
+				},
+				error: (err) => {
+					throw err
+				},
+			})
 
-		this.#encoder.configure(this.#encoderConfig)
+			this.#encoder.configure(this.#encoderConfig)
+		} catch (e) {
+			console.error("Failed to configure AudioEncoder:", e)
+			throw e
+		}
 	}
 
 	#transform(frame: AudioData) {
-		this.#encoder.encode(frame)
+		try {
+			this.#encoder.encode(frame)
+		} catch (e) {
+			console.error("Failed to encode audio frame:", e)
+			throw e
+		}
 		frame.close()
 	}
 

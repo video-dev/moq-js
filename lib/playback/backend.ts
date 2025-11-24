@@ -6,7 +6,7 @@ import MediaWorker from "web-worker:./worker/index.ts"
 
 import { RingShared } from "../common/ring"
 import { Root, isAudioTrack } from "../media/catalog"
-import { SubgroupHeader } from "../transport/objects"
+import { SubgroupHeader } from "../transport/subgroup"
 
 export interface PlayerConfig {
 	canvas: OffscreenCanvas
