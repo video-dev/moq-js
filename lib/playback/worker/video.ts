@@ -18,17 +18,31 @@ interface DecoderConfig {
 	optimizeForLatency?: boolean
 }
 
+// Wrapper for VideoFrame with original timestamp
+interface FrameWithTimestamp {
+	frame: VideoFrame
+	originalTimestamp: number
+}
+
 export class Renderer {
 	#canvas: OffscreenCanvas
 	#timeline: Component
 
 	#decoder!: VideoDecoder
-	#queue: TransformStream<Frame, VideoFrame>
+	#queue: TransformStream<Frame, FrameWithTimestamp>
 
 	#decoderConfig?: DecoderConfig
 	#waitingForKeyframe: boolean = true
 	#paused: boolean
 	#hasSentWaitingForKeyFrameEvent: boolean = false
+
+	// Frame timing for proper playback rate
+	#playbackStartTime: number | null = null
+	#firstFrameTimestamp: number | null = null
+
+	// Map to store original timestamps for frames (with memory leak protection)
+	#frameTimestamps: Map<number, number> = new Map()
+	#MAX_TIMESTAMP_MAP_SIZE = 100 // Prevent memory leaks
 
 	constructor(config: Message.ConfigVideo, timeline: Component) {
 		this.#canvas = config.canvas
@@ -49,20 +63,57 @@ export class Renderer {
 			console.error(err)
 		})
 		this.#waitingForKeyframe = true
+		// Reset timing on pause so next play starts fresh
+		this.#playbackStartTime = null
+		this.#firstFrameTimestamp = null
 	}
 
 	play() {
 		this.#paused = false
+		// Reset timing on play to start fresh
+		this.#playbackStartTime = null
+		this.#firstFrameTimestamp = null
 	}
 
 	async #run() {
 		const reader = this.#timeline.frames.pipeThrough(this.#queue).getReader()
+
 		for (;;) {
-			const { value: frame, done } = await reader.read()
+			const { value: frameWithTimestamp, done } = await reader.read()
 			if (this.#paused) continue
 			if (done) break
 
+			const frame = frameWithTimestamp.frame
+			const frameTimestampMs = frameWithTimestamp.originalTimestamp
+
+			// Initialize timing on first frame
+			if (this.#firstFrameTimestamp === null || this.#playbackStartTime === null) {
+				this.#firstFrameTimestamp = frameTimestampMs
+				this.#playbackStartTime = performance.now()
+			}
+
+			// Calculate when this frame should be displayed
+			const frameOffsetMs = frameTimestampMs - this.#firstFrameTimestamp
+			const targetDisplayTime = this.#playbackStartTime + frameOffsetMs
+
+			// Use requestAnimationFrame with timestamp for smoother playback
 			self.requestAnimationFrame(() => {
+				// Check if still not paused (could have paused during wait)
+				if (this.#paused) {
+					frame.close()
+					return
+				}
+
+				// Check if we should skip this frame (too late)
+				const now = performance.now()
+				const lateness = now - targetDisplayTime
+
+				// If we're more than 50ms late, skip this frame
+				if (lateness > 50) {
+					frame.close()
+					return
+				}
+
 				this.#canvas.width = frame.displayWidth
 				this.#canvas.height = frame.displayHeight
 
@@ -75,10 +126,26 @@ export class Renderer {
 		}
 	}
 
-	#start(controller: TransformStreamDefaultController<VideoFrame>) {
+	#start(controller: TransformStreamDefaultController<FrameWithTimestamp>) {
 		this.#decoder = new VideoDecoder({
 			output: (frame: VideoFrame) => {
-				controller.enqueue(frame)
+				// Retrieve the original timestamp from our map
+				const originalTimestamp = this.#frameTimestamps.get(frame.timestamp)
+				if (originalTimestamp !== undefined) {
+					// Wrap frame with original timestamp
+					controller.enqueue({
+						frame: frame,
+						originalTimestamp: originalTimestamp,
+					})
+					// Clean up the map entry
+					this.#frameTimestamps.delete(frame.timestamp)
+				} else {
+					// Fallback: use the frame's timestamp converted to milliseconds
+					controller.enqueue({
+						frame: frame,
+						originalTimestamp: frame.timestamp / 1000,
+					})
+				}
 			},
 			error: console.error,
 		})
@@ -140,7 +207,7 @@ export class Renderer {
 			if (this.#waitingForKeyframe && !frame.sample.is_sync) {
 				console.warn("Skipping non-keyframe until a keyframe is found.")
 				if (!this.#hasSentWaitingForKeyFrameEvent) {
-					self.postMessage("waitingforkeyframe")
+					self.postMessage({ type: "waitingforkeyframe" })
 					this.#hasSentWaitingForKeyFrameEvent = true
 				}
 				return
@@ -152,10 +219,26 @@ export class Renderer {
 				this.#hasSentWaitingForKeyFrameEvent = false
 			}
 
+			// Calculate timestamp in seconds for the chunk (standard WebCodecs unit)
+			const timestampSeconds = frame.sample.dts / frame.track.timescale
+
+			// Store the original timestamp (in milliseconds) so we can retrieve it later
+			const timestampMs = timestampSeconds * 1000
+
+			// Prevent memory leak: if map gets too large, clear oldest entries
+			if (this.#frameTimestamps.size >= this.#MAX_TIMESTAMP_MAP_SIZE) {
+				const firstKey = this.#frameTimestamps.keys().next().value
+				if (firstKey !== undefined) {
+					this.#frameTimestamps.delete(firstKey)
+				}
+			}
+
+			this.#frameTimestamps.set(timestampSeconds, timestampMs)
+
 			const chunk = new EncodedVideoChunk({
 				type: frame.sample.is_sync ? "key" : "delta",
 				data: frame.sample.data,
-				timestamp: frame.sample.dts / frame.track.timescale,
+				timestamp: timestampSeconds,
 			})
 
 			this.#decoder.decode(chunk)

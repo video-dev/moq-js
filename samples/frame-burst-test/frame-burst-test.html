@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<title>MoQ Player - Frame Burst Test</title>
+	<script src="/moq-player/moq-simple-player.iife.js"></script>
+	<style>
+		body {
+			font-family: 'Courier New', monospace;
+			margin: 2rem;
+			background-color: #1a1a1a;
+			color: #00ff00;
+		}
+
+		.container {
+			max-width: 1200px;
+			margin: 0 auto;
+		}
+
+		h1 {
+			text-align: center;
+			margin-bottom: 1rem;
+			color: #00ff00;
+			text-shadow: 0 0 10px #00ff00;
+		}
+
+		.test-info {
+			background-color: #2a2a2a;
+			padding: 1rem;
+			margin-bottom: 1rem;
+			border: 2px solid #00ff00;
+			border-radius: 8px;
+		}
+
+		.test-info h2 {
+			margin-top: 0;
+			color: #ffaa00;
+		}
+
+		.video-section {
+			display: flex;
+			gap: 1rem;
+			margin-bottom: 1rem;
+		}
+
+		.canvas-wrapper {
+			flex: 1;
+			background-color: #000;
+			border: 2px solid #00ff00;
+			border-radius: 8px;
+			position: relative;
+			min-height: 400px;
+		}
+
+		canvas {
+			width: 100%;
+			height: auto;
+			display: block;
+		}
+
+		.metrics {
+			flex: 1;
+			background-color: #2a2a2a;
+			padding: 1rem;
+			border: 2px solid #00ff00;
+			border-radius: 8px;
+			overflow-y: auto;
+			max-height: 400px;
+		}
+
+		.metrics h3 {
+			margin-top: 0;
+			color: #ffaa00;
+		}
+
+		.metric-row {
+			display: flex;
+			justify-content: space-between;
+			padding: 0.25rem 0;
+			border-bottom: 1px solid #333;
+		}
+
+		.metric-label {
+			color: #aaa;
+		}
+
+		.metric-value {
+			color: #00ff00;
+			font-weight: bold;
+		}
+
+		.warning {
+			color: #ff0000;
+			font-weight: bold;
+		}
+
+		.controls {
+			text-align: center;
+			margin-bottom: 1rem;
+		}
+
+		button {
+			background-color: #00ff00;
+			color: #000;
+			border: none;
+			padding: 1rem 2rem;
+			font-size: 1rem;
+			font-weight: bold;
+			cursor: pointer;
+			border-radius: 4px;
+			margin: 0 0.5rem;
+		}
+
+		button:hover {
+			background-color: #00cc00;
+		}
+
+		button:disabled {
+			background-color: #666;
+			color: #aaa;
+			cursor: not-allowed;
+		}
+
+		.log-section {
+			background-color: #2a2a2a;
+			padding: 1rem;
+			border: 2px solid #00ff00;
+			border-radius: 8px;
+			max-height: 300px;
+			overflow-y: auto;
+		}
+
+		.log-section h3 {
+			margin-top: 0;
+			color: #ffaa00;
+		}
+
+		.log-entry {
+			padding: 0.25rem 0;
+			font-size: 0.9rem;
+		}
+
+		.log-burst {
+			color: #ff0000;
+			font-weight: bold;
+		}
+
+		.log-normal {
+			color: #00ff00;
+		}
+
+		.chart {
+			background-color: #000;
+			border: 2px solid #00ff00;
+			border-radius: 8px;
+			padding: 1rem;
+			margin-bottom: 1rem;
+			min-height: 200px;
+		}
+
+		#frameChart {
+			width: 100%;
+			height: 180px;
+		}
+
+		.test-result {
+			background-color: #2a2a2a;
+			padding: 1rem;
+			margin-bottom: 1rem;
+			border: 2px solid;
+			border-radius: 8px;
+			font-size: 1.2rem;
+			font-weight: bold;
+			text-align: center;
+		}
+
+		.result-pass {
+			border-color: #00ff00;
+			color: #00ff00;
+		}
+
+		.result-fail {
+			border-color: #ff0000;
+			color: #ff0000;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>📊 MoQ Player - Frame Burst Test</h1>
+
+		<div class="test-info">
+			<h2>Test Objective</h2>
+			<p>This test demonstrates and measures the "frame burst" problem at playback start.</p>
+			<p><strong>Expected behavior:</strong> Frames should be rendered at a consistent rate (e.g., ~33ms for 30fps).</p>
+			<p><strong>Actual behavior (bug):</strong> Initial frames are rendered rapidly in a burst (&lt;5ms intervals), then playback normalizes.</p>
+			<p><strong>Test criteria:</strong> FAIL if more than 5 frames are rendered with &lt;10ms intervals at the start.</p>
+		</div>
+
+		<div id="testResult" class="test-result" style="display: none;"></div>
+
+		<div class="controls">
+			<button id="playButton" disabled>⏳ Loading...</button>
+			<button id="resetButton">🔄 Reset Test</button>
+		</div>
+
+		<div class="video-section">
+			<div class="canvas-wrapper">
+				<canvas id="canvas"></canvas>
+			</div>
+			<div class="metrics">
+				<h3>📈 Real-time Metrics</h3>
+				<div class="metric-row">
+					<span class="metric-label">Total Frames:</span>
+					<span class="metric-value" id="totalFrames">0</span>
+				</div>
+				<div class="metric-row">
+					<span class="metric-label">Burst Frames (&lt;10ms):</span>
+					<span class="metric-value warning" id="burstFrames">0</span>
+				</div>
+				<div class="metric-row">
+					<span class="metric-label">Avg Frame Interval:</span>
+					<span class="metric-value" id="avgInterval">0ms</span>
+				</div>
+				<div class="metric-row">
+					<span class="metric-label">Min Frame Interval:</span>
+					<span class="metric-value" id="minInterval">0ms</span>
+				</div>
+				<div class="metric-row">
+					<span class="metric-label">Max Frame Interval:</span>
+					<span class="metric-value" id="maxInterval">0ms</span>
+				</div>
+				<div class="metric-row">
+					<span class="metric-label">Expected FPS (30fps):</span>
+					<span class="metric-value">~33.3ms</span>
+				</div>
+				<div class="metric-row">
+					<span class="metric-label">Current Status:</span>
+					<span class="metric-value" id="status">Ready</span>
+				</div>
+			</div>
+		</div>
+
+		<div class="chart">
+			<h3>📊 Frame Interval Timeline (first 100 frames)</h3>
+			<canvas id="frameChart"></canvas>
+		</div>
+
+		<div class="log-section">
+			<h3>📝 Frame Rendering Log (first 20 frames)</h3>
+			<div id="logEntries"></div>
+		</div>
+	</div>
+
+	<script>
+		// Frame tracking
+		const frameTimestamps = [];
+		const frameIntervals = [];
+		const logEntries = [];
+		let lastFrameTime = null;
+		let burstFrameCount = 0;
+		let player = null;
+		let testStartTime = null;
+
+		// DOM elements
+		const playButton = document.getElementById('playButton');
+		const resetButton = document.getElementById('resetButton');
+		const canvas = document.getElementById('canvas');
+		const chartCanvas = document.getElementById('frameChart');
+		const ctx = chartCanvas.getContext('2d');
+
+		// Configuration - Using same server as mediaoverquic.com
+		const config = {
+			url: "https://relay.cloudflare.mediaoverquic.com",
+			canvas: canvas,
+			namespace: "bbb",
+		};
+
+		// Frame rendering event handler
+		function onFrameRendered(event) {
+			const now = event.detail.timestamp;
+
+			// Track frame timestamp
+			frameTimestamps.push(now);
+
+			// Calculate interval since last frame
+			if (lastFrameTime !== null) {
+				const interval = now - lastFrameTime;
+				frameIntervals.push(interval);
+
+				// Track burst frames (< 10ms is abnormally fast)
+				if (interval < 10) {
+					burstFrameCount++;
+				}
+
+				// Log first 20 frames
+				if (frameTimestamps.length <= 20) {
+					const isBurst = interval < 10;
+					logEntries.push({
+						frame: frameTimestamps.length,
+						time: (now - testStartTime).toFixed(2),
+						interval: interval.toFixed(2),
+						isBurst: isBurst
+					});
+					updateLog();
+				}
+			} else {
+				testStartTime = now;
+			}
+
+			lastFrameTime = now;
+
+			// Update metrics
+			updateMetrics();
+
+			// Update chart (throttled)
+			if (frameTimestamps.length % 5 === 0 || frameTimestamps.length <= 20) {
+				updateChart();
+			}
+		}
+
+		function updateMetrics() {
+			document.getElementById('totalFrames').textContent = frameTimestamps.length;
+			document.getElementById('burstFrames').textContent = burstFrameCount;
+
+			if (frameIntervals.length > 0) {
+				const avgInterval = frameIntervals.reduce((a, b) => a + b, 0) / frameIntervals.length;
+				const minInterval = Math.min(...frameIntervals);
+				const maxInterval = Math.max(...frameIntervals);
+
+				document.getElementById('avgInterval').textContent = avgInterval.toFixed(2) + 'ms';
+				document.getElementById('minInterval').textContent = minInterval.toFixed(2) + 'ms';
+				document.getElementById('maxInterval').textContent = maxInterval.toFixed(2) + 'ms';
+			}
+
+			// Check test result after 50 frames
+			if (frameTimestamps.length === 50) {
+				showTestResult();
+			}
+		}
+
+		function updateLog() {
+			const logContainer = document.getElementById('logEntries');
+			logContainer.innerHTML = '';
+
+			logEntries.forEach(entry => {
+				const div = document.createElement('div');
+				div.className = `log-entry ${entry.isBurst ? 'log-burst' : 'log-normal'}`;
+				const marker = entry.isBurst ? '⚠️ BURST' : '✓ Normal';
+				div.textContent = `Frame #${entry.frame} @ ${entry.time}ms | Interval: ${entry.interval}ms | ${marker}`;
+				logContainer.appendChild(div);
+			});
+		}
+
+		function updateChart() {
+			const width = chartCanvas.width;
+			const height = chartCanvas.height;
+
+			// Clear canvas
+			ctx.fillStyle = '#000';
+			ctx.fillRect(0, 0, width, height);
+
+			if (frameIntervals.length === 0) return;
+
+			// Draw grid
+			ctx.strokeStyle = '#333';
+			ctx.lineWidth = 1;
+
+			// Horizontal lines (every 10ms)
+			for (let i = 0; i <= 100; i += 10) {
+				const y = height - (i / 100) * height;
+				ctx.beginPath();
+				ctx.moveTo(0, y);
+				ctx.lineTo(width, y);
+				ctx.stroke();
+
+				// Labels
+				ctx.fillStyle = '#666';
+				ctx.font = '10px monospace';
+				ctx.fillText(i + 'ms', 5, y - 2);
+			}
+
+			// Draw expected 30fps line (33.3ms)
+			ctx.strokeStyle = '#00ff00';
+			ctx.lineWidth = 2;
+			ctx.setLineDash([5, 5]);
+			const expectedY = height - (33.3 / 100) * height;
+			ctx.beginPath();
+			ctx.moveTo(0, expectedY);
+			ctx.lineTo(width, expectedY);
+			ctx.stroke();
+			ctx.setLineDash([]);
+
+			// Draw frame intervals
+			const maxFramesToShow = 100;
+			const framesToPlot = Math.min(frameIntervals.length, maxFramesToShow);
+			const barWidth = width / maxFramesToShow;
+
+			for (let i = 0; i < framesToPlot; i++) {
+				const interval = frameIntervals[i];
+				const barHeight = Math.min((interval / 100) * height, height);
+				const x = i * barWidth;
+				const y = height - barHeight;
+
+				// Color code: red for burst, yellow for normal, green for ideal
+				if (interval < 10) {
+					ctx.fillStyle = '#ff0000';
+				} else if (interval < 25 || interval > 45) {
+					ctx.fillStyle = '#ffaa00';
+				} else {
+					ctx.fillStyle = '#00ff00';
+				}
+
+				ctx.fillRect(x, y, barWidth - 1, barHeight);
+			}
+
+			// Draw legend
+			ctx.fillStyle = '#00ff00';
+			ctx.font = '12px monospace';
+			ctx.fillText('--- Expected 30fps (~33ms)', width - 200, 15);
+		}
+
+		function showTestResult() {
+			const resultDiv = document.getElementById('testResult');
+			const testPassed = burstFrameCount <= 5;
+
+			resultDiv.className = `test-result ${testPassed ? 'result-pass' : 'result-fail'}`;
+
+			if (testPassed) {
+				resultDiv.innerHTML = '✅ TEST PASSED: No significant frame burst detected!';
+			} else {
+				resultDiv.innerHTML = `❌ TEST FAILED: ${burstFrameCount} burst frames detected (threshold: 5)`;
+			}
+
+			resultDiv.style.display = 'block';
+			document.getElementById('status').textContent = testPassed ? 'PASSED' : 'FAILED';
+		}
+
+		function resetTest() {
+			// Remove event listener if player exists
+			if (player) {
+				player.removeEventListener('frame-rendered', onFrameRendered);
+			}
+
+			frameTimestamps.length = 0;
+			frameIntervals.length = 0;
+			logEntries.length = 0;
+			lastFrameTime = null;
+			burstFrameCount = 0;
+			testStartTime = null;
+
+			document.getElementById('totalFrames').textContent = '0';
+			document.getElementById('burstFrames').textContent = '0';
+			document.getElementById('avgInterval').textContent = '0ms';
+			document.getElementById('minInterval').textContent = '0ms';
+			document.getElementById('maxInterval').textContent = '0ms';
+			document.getElementById('status').textContent = 'Ready';
+			document.getElementById('logEntries').innerHTML = '';
+			document.getElementById('testResult').style.display = 'none';
+
+			// Clear chart
+			ctx.fillStyle = '#000';
+			ctx.fillRect(0, 0, chartCanvas.width, chartCanvas.height);
+
+			if (player) {
+				player.pause();
+			}
+
+			playButton.disabled = false;
+		}
+
+		// Initialize (no canvas interception needed)
+
+		// Set chart canvas size
+		chartCanvas.width = chartCanvas.offsetWidth;
+		chartCanvas.height = 180;
+
+		// Create player
+		document.getElementById('status').textContent = 'Initializing player...';
+		playButton.disabled = true;
+
+		MoqSimplePlayer.create(config, 0).then((p) => {
+			player = p;
+			console.log('✅ Player created successfully');
+
+			player.addEventListener("loadeddata", () => {
+				console.log("📺 Received loadeddata event");
+			});
+
+			player.addEventListener("play", (e) => {
+				console.log("▶️ Received play event", e.detail);
+				document.getElementById('status').textContent = 'Testing...';
+			});
+
+			player.addEventListener("pause", (e) => {
+				console.log("⏸️ Received pause event", e.detail);
+			});
+
+			player.addEventListener("error", (e) => {
+				console.error("❌ Player error:", e);
+				document.getElementById('status').textContent = 'Error: ' + e.message;
+			});
+
+			// Auto-start test to capture initial burst
+			console.log('🎬 Auto-starting test to capture initial playback');
+			document.getElementById('status').textContent = 'Auto-starting test...';
+
+			// Listen for frame-rendered events
+			player.addEventListener('frame-rendered', onFrameRendered);
+
+			// Start playing immediately
+			player.play();
+			playButton.textContent = '🔄 Reset & Restart Test';
+			playButton.disabled = false;
+		}).catch((error) => {
+			console.error('❌ Failed to create player:', error);
+			document.getElementById('status').textContent = 'Error: ' + error.message;
+			document.getElementById('status').className = 'metric-value warning';
+			alert('Failed to create player. Check console for details.\n\nError: ' + error.message);
+		});
+
+		playButton.addEventListener('click', () => {
+			console.log('🎬 Start button clicked');
+			if (!player) {
+				console.error('❌ Player not initialized yet');
+				alert('Player is not ready yet. Please wait...');
+				return;
+			}
+			resetTest();
+			try {
+				// Listen for frame-rendered events
+				player.addEventListener('frame-rendered', onFrameRendered);
+
+				player.play();
+				playButton.disabled = true;
+				document.getElementById('status').textContent = 'Testing...';
+				console.log('▶️ Player.play() called');
+			} catch (error) {
+				console.error('❌ Error calling player.play():', error);
+				alert('Error starting playback: ' + error.message);
+				player.removeEventListener('frame-rendered', onFrameRendered);
+			}
+		});
+
+		resetButton.addEventListener('click', () => {
+			resetTest();
+		});
+	</script>
+</body>
+</html>
