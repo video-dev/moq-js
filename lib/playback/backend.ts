@@ -114,7 +114,7 @@ export default class Backend {
 
 	private on(e: MessageEvent) {
 		const msg = e.data
-		if (msg === "waitingforkeyframe") {
+		if (msg.type === "waitingforkeyframe") {
 			this.#eventTarget.dispatchEvent(new Event("waitingforkeyframe"))
 		}
 	}
