@@ -1,52 +1,221 @@
-import { Reader, Writer } from "./stream"
-export { Reader, Writer }
+import { SubgroupHeader, SubgroupObject, SubgroupReader, SubgroupType, SubgroupWriter } from "./subgroup"
+import { KeyValuePairs } from "./base_data"
+import { debug } from "./utils"
+import { ImmutableBytesBuffer, MutableBytesBuffer, ReadableStreamBuffer, Reader, WritableStreamBuffer, Writer } from "./buffer"
 
-// Each stream type is prefixed with the given VarInt type.
-// https://www.ietf.org/archive/id/draft-ietf-moq-transport-06.html#section-7
-export enum StreamType {
-	// Datagram = 0x1, // No datagram support
-	Track = 0x2, // Deprecated in DRAFT_07
-	Subgroup = 0x4,
-	// Fetch = 0x5, // Added in DRAFT_07
+export enum ObjectForwardingPreference {
+	Datagram = "Datagram",
+	Subgroup = "Subgroup",
 }
 
 export enum Status {
+	NORMAL = 0,
 	OBJECT_NULL = 1,
-	GROUP_NULL = 2,
 	GROUP_END = 3,
 	TRACK_END = 4,
 }
 
-export interface TrackHeader {
-	type: StreamType.Track
-	sub: bigint
-	track: bigint
-	publisher_priority: number // VarInt with a u32 maximum value
+export namespace Status {
+	export function serialize(status: Status): Uint8Array {
+		const w = new MutableBytesBuffer(new Uint8Array())
+		w.putVarInt(status)
+		return w.Uint8Array
+	}
+	export function deserialize(reader: ImmutableBytesBuffer): Status {
+		return try_from(reader.getNumberVarInt())
+	}
+	export function try_from(value: number | bigint) {
+		const v = typeof value === "bigint" ? Number(value) : value
+
+		switch (v) {
+			case 0:
+				return Status.NORMAL
+			case 1:
+				return Status.OBJECT_NULL
+			case 3:
+				return Status.GROUP_END
+			case 4:
+				return Status.TRACK_END
+			default:
+				throw new Error(`invalid object status: ${v}`)
+		}
+	}
 }
 
-export interface TrackChunk {
-	group: number // The group sequence, as a number because 2^53 is enough.
-	object: number
-	status?: Status // Only sent if Object Payload Length is zero
-	payload: Uint8Array | Status
+export interface Object {
+	track_namespace: string
+	track_name: string
+	group_id: number
+	object_id: number
+	publisher_priority: number
+	object_forwarding_preference: ObjectForwardingPreference
+	subgroup_id: number
+	status: Status
+	extension_headers: KeyValuePairs
+	object_payload?: Uint8Array
 }
 
-export interface SubgroupHeader {
-	type: StreamType.Subgroup
-	sub: bigint
-	track: bigint
-	group: number // The group sequence, as a number because 2^53 is enough.
-	subgroup: number // The subgroup sequence, as a number because 2^53 is enough.
-	publisher_priority: number // VarInt with a u32 maximum value
+export function isDatagram(obj: ObjectDatagram | SubgroupHeader): boolean {
+	return obj.type in ObjectDatagramType
 }
 
-export interface SubgroupChunk {
-	object: number
-	status?: Status // Only sent if Object Payload Length is zero
-	payload: Uint8Array | Status
+
+export enum ObjectDatagramType {
+	Type0x0 = 0x0,
+	Type0x1 = 0x1,
+	Type0x2 = 0x2,
+	Type0x3 = 0x3,
+	Type0x4 = 0x4,
+	Type0x5 = 0x5,
+	Type0x6 = 0x6,
+	Type0x7 = 0x7,
+	Type0x20 = 0x20,
+	Type0x21 = 0x21,
 }
 
-type WriterType<T> = T extends TrackHeader ? TrackWriter : T extends SubgroupHeader ? SubgroupWriter : never
+export namespace ObjectDatagramType {
+	export function serialize(type: ObjectDatagramType): Uint8Array {
+		const w = new MutableBytesBuffer(new Uint8Array())
+		w.putVarInt(type)
+		return w.Uint8Array
+	}
+	export function deserialize(reader: ImmutableBytesBuffer): ObjectDatagramType {
+		return try_from(reader.getNumberVarInt())
+	}
+	export function try_from(value: number | bigint): ObjectDatagramType {
+		const v = typeof value === "bigint" ? Number(value) : value
+
+		switch (v) {
+			case ObjectDatagramType.Type0x0:
+			case ObjectDatagramType.Type0x1:
+			case ObjectDatagramType.Type0x2:
+			case ObjectDatagramType.Type0x3:
+			case ObjectDatagramType.Type0x4:
+			case ObjectDatagramType.Type0x5:
+			case ObjectDatagramType.Type0x6:
+			case ObjectDatagramType.Type0x7:
+			case ObjectDatagramType.Type0x20:
+			case ObjectDatagramType.Type0x21:
+				return v as ObjectDatagramType
+			default:
+				throw new Error(`invalid object datagram type: ${v}`)
+		}
+	}
+
+	export function isEndOfGroup(type: ObjectDatagramType) {
+		switch (type) {
+			case ObjectDatagramType.Type0x2:
+			case ObjectDatagramType.Type0x3:
+			case ObjectDatagramType.Type0x6:
+			case ObjectDatagramType.Type0x7:
+				return true
+			default:
+				return false
+		}
+	}
+
+	export function hasExtensions(type: ObjectDatagramType) {
+		switch (type) {
+			case ObjectDatagramType.Type0x1:
+			case ObjectDatagramType.Type0x3:
+			case ObjectDatagramType.Type0x5:
+			case ObjectDatagramType.Type0x7:
+			case ObjectDatagramType.Type0x21:
+				return true
+			default:
+				return false
+		}
+	}
+
+	export function hasObjectId(type: ObjectDatagramType) {
+		switch (type) {
+			case ObjectDatagramType.Type0x4:
+			case ObjectDatagramType.Type0x5:
+			case ObjectDatagramType.Type0x6:
+			case ObjectDatagramType.Type0x7:
+				return false
+			default:
+				return true
+		}
+	}
+
+	export function hasStatus(type: ObjectDatagramType) {
+		switch (type) {
+			case ObjectDatagramType.Type0x20:
+			case ObjectDatagramType.Type0x21:
+				return true
+			default:
+				return false
+		}
+	}
+}
+
+export interface ObjectDatagram {
+	type: ObjectDatagramType
+	track_alias: bigint
+	group_id: number
+	object_id?: number
+	publisher_priority: number
+	extension_headers?: KeyValuePairs
+	status?: Status
+	object_payload?: Uint8Array
+}
+
+export namespace ObjectDatagram {
+	export function serialize(obj: ObjectDatagram): Uint8Array {
+		const buf = new MutableBytesBuffer(new Uint8Array())
+		buf.putBytes(ObjectDatagramType.serialize(obj.type))
+		buf.putVarInt(obj.group_id)
+		if (obj.object_id) {
+			buf.putVarInt(obj.object_id)
+		}
+		if (obj.object_payload) {
+			buf.putVarInt(obj.object_payload.byteLength)
+			buf.putBytes(obj.object_payload)
+		} else {
+			buf.putVarInt(0)
+			buf.putVarInt(obj.status as number)
+		}
+		return buf.Uint8Array
+	}
+
+	export function deserialize(reader: ImmutableBytesBuffer): ObjectDatagram {
+
+		const type = reader.getNumberVarInt()
+		const alias = reader.getVarInt()
+		const group = reader.getNumberVarInt()
+		let object_id: number | undefined
+		if (ObjectDatagramType.hasObjectId(type)) {
+			object_id = reader.getNumberVarInt()
+		}
+		const publisher_priority = reader.getU8()
+		let extHeaders: KeyValuePairs | undefined
+		if (ObjectDatagramType.hasExtensions(type)) {
+			const extHeadersLength = reader.getNumberVarInt()
+			const extHeadersData = reader.getBytes(extHeadersLength)
+
+			extHeaders = KeyValuePairs.deserialize_with_size(new ImmutableBytesBuffer(extHeadersData), extHeadersLength)
+		}
+		let status: Status | undefined
+		let payload: Uint8Array | undefined
+		if (ObjectDatagramType.hasStatus(type)) {
+			status = Status.try_from(reader.getNumberVarInt())
+		} else {
+			payload = reader.getBytes(reader.remaining)
+		}
+
+		return {
+			group_id: group,
+			object_id,
+			object_payload: payload,
+			status,
+			type,
+			track_alias: alias,
+			publisher_priority,
+			extension_headers: extHeaders,
+		}
+	}
+}
 
 export class Objects {
 	private quic: WebTransport
@@ -55,150 +224,147 @@ export class Objects {
 		this.quic = quic
 	}
 
-	async send<T extends TrackHeader | SubgroupHeader>(h: T): Promise<WriterType<T>> {
-		const stream = await this.quic.createUnidirectionalStream()
-		const w = new Writer(stream)
+	async send(h: ObjectDatagram | SubgroupHeader): Promise<TrackWriter | SubgroupWriter> {
+		const is_datagram = isDatagram(h);
 
-		await w.u53(h.type)
-		await w.u62(h.sub)
-		await w.u62(h.track)
-
-		let res: WriterType<T>
-
-		if (h.type === StreamType.Subgroup) {
-			await w.u53(h.group)
-			await w.u53(h.subgroup)
-			await w.u8(h.publisher_priority)
-
-			res = new SubgroupWriter(h, w) as WriterType<T>
-		} else if (h.type === StreamType.Track) {
-			await w.u8(h.publisher_priority)
-
-			res = new TrackWriter(h, w) as WriterType<T>
+		if (is_datagram) {
+			// Datagram mode
+			const stream = this.quic.datagrams.writable
+			const w = new WritableStreamBuffer(stream)
+			return new TrackWriter(w)
 		} else {
-			throw new Error("unknown header type")
+			// Subgroup stream mode
+			const stream = await this.quic.createUnidirectionalStream()
+			const w = new WritableStreamBuffer(stream)
+
+			// Write subgroup header
+			const subgroupHeader = h as SubgroupHeader
+			await w.write(SubgroupHeader.serialize(subgroupHeader))
+
+			return new SubgroupWriter(subgroupHeader, w)
 		}
-
-		// console.trace("send object", res.header)
-
-		return res
 	}
 
 	async recv(): Promise<TrackReader | SubgroupReader | undefined> {
+		console.log("Objects.recv waiting for streams")
 		const streams = this.quic.incomingUnidirectionalStreams.getReader()
 
+		console.log("Objects.recv got streams", streams)
 		const { value, done } = await streams.read()
+		console.log("Objects.recv got value, done", value, done)
 		streams.releaseLock()
 
 		if (done) return
 
-		const r = new Reader(new Uint8Array(), value)
-		const type = (await r.u53()) as StreamType
-		let res: TrackReader | SubgroupReader
+		const r = new ReadableStreamBuffer(value)
+		const type = await r.getNumberVarInt()
 
-		if (type == StreamType.Track) {
-			const h: TrackHeader = {
-				type,
-				sub: await r.u62(),
-				track: await r.u62(),
-				publisher_priority: await r.u8(),
+		// Try to parse as SubgroupType
+		try {
+			const subgroupType = SubgroupType.try_from(type)
+			console.log("Objects.recv got type", subgroupType)
+
+			const track_alias = await r.getVarInt()
+			const group_id = await r.getNumberVarInt()
+
+			let subgroup_id: number | undefined
+			if (SubgroupType.hasExplicitSubgroupId(subgroupType)) {
+				subgroup_id = await r.getNumberVarInt()
+			} else if (SubgroupType.isSubgroupIdZero(subgroupType)) {
+				subgroup_id = 0
+			} else {
+				// Subgroup ID is first object ID - will be set when reading first object
+				subgroup_id = undefined
 			}
 
-			res = new TrackReader(h, r)
-		} else if (type == StreamType.Subgroup) {
-			const h = {
-				type,
-				sub: await r.u62(),
-				track: await r.u62(),
-				group: await r.u53(),
-				subgroup: await r.u53(),
-				publisher_priority: await r.u8(),
+			const publisher_priority = await r.getU8()
+
+			const h: SubgroupHeader = {
+				type: subgroupType,
+				track_alias,
+				group_id,
+				subgroup_id,
+				publisher_priority,
 			}
-			res = new SubgroupReader(h, r)
-		} else {
+
+			console.log("Objects.recv got subgroup header", h)
+
+			return new SubgroupReader(h, r)
+		} catch (e) {
+			// Not a subgroup type, might be datagram or other type
 			console.log("transport/objects.ts: unknown stream type: ", type)
-			throw new Error("unknown stream type")
+			throw new Error(`unknown stream type: ${type}`)
 		}
-
-		// console.trace("receive object", res.header)
-
-		return res
 	}
 }
 
+// TrackWriter is object sender over datagram
 export class TrackWriter {
+	// For compatibility with reader interface
+	public header = { track_alias: 0n }
+
 	constructor(
-		public header: TrackHeader,
 		public stream: Writer,
-	) {}
+	) { }
 
-	async write(c: TrackChunk) {
-		await this.stream.u53(c.group)
-		await this.stream.u53(c.object)
-
-		if (c.payload instanceof Uint8Array) {
-			await this.stream.u53(c.payload.byteLength)
-			await this.stream.write(c.payload)
-		} else {
-			// empty payload with status
-			await this.stream.u53(0)
-			await this.stream.u53(c.payload as number)
-		}
+	async write(c: ObjectDatagram) {
+		return this.stream.write(ObjectDatagram.serialize(c))
 	}
 
 	async close() {
-		await this.stream.close()
+		return this.stream.close()
 	}
 }
 
-export class SubgroupWriter {
-	constructor(
-		public header: SubgroupHeader,
-		public stream: Writer,
-	) {}
-
-	async write(c: SubgroupChunk) {
-		await this.stream.u53(c.object)
-		if (c.payload instanceof Uint8Array) {
-			await this.stream.u53(c.payload.byteLength)
-			await this.stream.write(c.payload)
-		} else {
-			await this.stream.u53(0)
-			await this.stream.u53(c.payload as number)
-		}
-	}
-
-	async close() {
-		await this.stream.close()
-	}
-}
 
 export class TrackReader {
-	constructor(
-		public header: TrackHeader,
-		public stream: Reader,
-	) {}
+	// Header with track_alias for routing
+	public header: { track_alias: bigint }
 
-	async read(): Promise<TrackChunk | undefined> {
+	constructor(
+		stream: Reader,
+		track_alias: bigint = 0n,
+	) {
+		this.stream = stream
+		this.header = { track_alias }
+	}
+
+	public stream: Reader
+
+	async read(): Promise<ObjectDatagram | undefined> {
 		if (await this.stream.done()) {
 			return
 		}
 
-		const group = await this.stream.u53()
-		const object = await this.stream.u53()
-		const size = await this.stream.u53()
-
-		let payload
-		if (size == 0) {
-			payload = (await this.stream.u53()) as Status
+		const type = await this.stream.getNumberVarInt()
+		const alias = await this.stream.getVarInt()
+		const group = await this.stream.getNumberVarInt()
+		let object_id: number | undefined
+		if (ObjectDatagramType.hasObjectId(type)) {
+			object_id = await this.stream.getNumberVarInt()
+		}
+		const publisher_priority = await this.stream.getU8()
+		let extHeaders: KeyValuePairs | undefined
+		if (ObjectDatagramType.hasExtensions(type)) {
+			extHeaders = await KeyValuePairs.deserialize_with_reader(this.stream)
+		}
+		let status: Status | undefined
+		let payload: Uint8Array | undefined
+		if (ObjectDatagramType.hasStatus(type)) {
+			status = Status.try_from(await this.stream.getNumberVarInt())
 		} else {
-			payload = await this.stream.read(size)
+			payload = await this.stream.read(this.stream.byteLength)
 		}
 
 		return {
-			group,
-			object,
-			payload,
+			group_id: group,
+			object_id,
+			object_payload: payload,
+			status,
+			type,
+			track_alias: alias,
+			publisher_priority,
+			extension_headers: extHeaders,
 		}
 	}
 
@@ -207,34 +373,3 @@ export class TrackReader {
 	}
 }
 
-export class SubgroupReader {
-	constructor(
-		public header: SubgroupHeader,
-		public stream: Reader,
-	) {}
-
-	async read(): Promise<SubgroupChunk | undefined> {
-		if (await this.stream.done()) {
-			return
-		}
-
-		const object = await this.stream.u53()
-		const size = await this.stream.u53()
-
-		let payload
-		if (size == 0) {
-			payload = (await this.stream.u53()) as Status
-		} else {
-			payload = await this.stream.read(size)
-		}
-
-		return {
-			object,
-			payload,
-		}
-	}
-
-	async close() {
-		await this.stream.close()
-	}
-}

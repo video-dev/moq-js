@@ -1,4 +1,4 @@
-import { SubgroupHeader } from "../../transport/objects"
+import { SubgroupHeader } from "../../transport/subgroup"
 import { RingShared } from "../../common/ring"
 
 export interface Config {

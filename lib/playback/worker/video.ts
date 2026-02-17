@@ -57,7 +57,7 @@ export class Renderer {
 
 	async #run() {
 		const reader = this.#timeline.frames.pipeThrough(this.#queue).getReader()
-		for (;;) {
+		for (; ;) {
 			const { value: frame, done } = await reader.read()
 			if (this.#paused) continue
 			if (done) break
@@ -127,7 +127,13 @@ export class Renderer {
 				// optimizeForLatency: true
 			}
 
-			this.#decoder.configure(this.#decoderConfig)
+			try {
+				this.#decoder.configure(this.#decoderConfig)
+				console.log(`[VideoWorker] Decoder configured successfully. New state: ${this.#decoder.state}`)
+			} catch (e) {
+				console.error("[VideoWorker] FAILED to configure decoder:", e)
+				return // Stop processing if configure fails
+			}
 			if (!frame.sample.is_sync) {
 				this.#waitingForKeyframe = true
 			} else {
@@ -158,7 +164,12 @@ export class Renderer {
 				timestamp: frame.sample.dts / frame.track.timescale,
 			})
 
-			this.#decoder.decode(chunk)
+			console.log(`[VideoWorker] Decoding chunk, type: ${chunk.type}, size: ${chunk.byteLength}`)
+			try {
+				this.#decoder.decode(chunk)
+			} catch (e) {
+				console.error("[VideoWorker] FAILED to decode chunk:", e)
+			}
 		}
 	}
 }

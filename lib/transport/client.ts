@@ -1,15 +1,12 @@
-import * as Stream from "./stream"
-import * as Setup from "./setup"
 import * as Control from "./control"
+import * as Stream from './stream'
 import { Objects } from "./objects"
 import { Connection } from "./connection"
+import { ClientSetup, ControlMessageType, ServerSetup } from "./control"
+import { ImmutableBytesBuffer, ReadableWritableStreamBuffer } from "./buffer"
 
 export interface ClientConfig {
 	url: string
-
-	// Parameters used to create the MoQ session
-	role: Setup.Role
-
 	// If set, the server fingerprint will be fetched from this URL.
 	// This is required to use self-signed certificates with Chrome (May 2023)
 	fingerprint?: string
@@ -30,7 +27,6 @@ export class Client {
 	}
 
 	async connect(): Promise<Connection> {
-		// Helper function to make creating a promise easier
 		const options: WebTransportOptions = {}
 
 		const fingerprint = await this.#fingerprint
@@ -39,28 +35,26 @@ export class Client {
 		const quic = new WebTransport(this.config.url, options)
 		await quic.ready
 
-		const stream = await quic.createBidirectionalStream()
+		const stream = await quic.createBidirectionalStream({ sendOrder: Number.MAX_SAFE_INTEGER })
 
-		const writer = new Stream.Writer(stream.writable)
-		const reader = new Stream.Reader(new Uint8Array(), stream.readable)
+		const buffer = new ReadableWritableStreamBuffer(stream.readable, stream.writable)
 
-		const setup = new Setup.Stream(reader, writer)
-
-		// Send the setup message.
-		await setup.send.client({
-			versions: [Setup.Version.DRAFT_07],
-			role: this.config.role,
-		})
+		const msg: Control.ClientSetup = {
+			versions: [Control.Version.DRAFT_14],
+			params: new Map(),
+		}
+		const serialized = Control.ClientSetup.serialize(msg)
+		await buffer.write(serialized)
 
 		// Receive the setup message.
 		// TODO verify the SETUP response.
-		const server = await setup.recv.server()
+		const server = await this.readServerSetup(buffer)
 
-		if (server.version != Setup.Version.DRAFT_07) {
+		if (server.version != Control.Version.DRAFT_14) {
 			throw new Error(`unsupported server version: ${server.version}`)
 		}
 
-		const control = new Control.Stream(reader, writer)
+		const control = new Stream.ControlStream(buffer)
 		const objects = new Objects(quic)
 
 		return new Connection(quic, control, objects)
@@ -82,5 +76,37 @@ export class Client {
 			algorithm: "sha-256",
 			value: hexBytes,
 		}
+	}
+
+	async readServerSetup(buffer: ReadableWritableStreamBuffer): Promise<ServerSetup> {
+		const type: ControlMessageType = await buffer.getNumberVarInt()
+		if (type !== ControlMessageType.ServerSetup) throw new Error(`server SETUP type must be ${ControlMessageType.ServerSetup}, got ${type}`)
+
+		const advertisedLength = await buffer.getU16()
+		const bufferLen = buffer.byteLength
+		if (advertisedLength !== bufferLen) {
+			throw new Error(`server SETUP message length mismatch: ${advertisedLength} != ${bufferLen}`)
+		}
+
+		const payload = await buffer.read(advertisedLength)
+		const bufReader = new ImmutableBytesBuffer(payload)
+		const msg = ServerSetup.deserialize(bufReader)
+
+		return msg
+	}
+
+	async readClientSetup(buffer: ReadableWritableStreamBuffer): Promise<ClientSetup> {
+		const type: ControlMessageType = await buffer.getNumberVarInt()
+		if (type !== ControlMessageType.ClientSetup) throw new Error(`client SETUP type must be ${ControlMessageType.ClientSetup}, got ${type}`)
+
+		const advertisedLength = await buffer.getU16()
+		const bufferLen = buffer.byteLength
+		if (advertisedLength !== bufferLen) {
+			throw new Error(`client SETUP message length mismatch: ${advertisedLength} != ${bufferLen}`)
+		}
+
+		const payload = await buffer.read(advertisedLength)
+		const bufReader = new ImmutableBytesBuffer(payload)
+		return ClientSetup.deserialize(bufReader)
 	}
 }

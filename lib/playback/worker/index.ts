@@ -7,7 +7,8 @@ import * as MP4 from "../../media/mp4"
 import * as Message from "./message"
 import { asError } from "../../common/error"
 import { Deferred } from "../../common/async"
-import { SubgroupReader, Reader } from "../../transport/objects"
+import { SubgroupReader } from "../../transport/subgroup"
+import { ReadableStreamBuffer } from "../../transport/buffer"
 
 class Worker {
 	// Timeline receives samples, buffering them and choosing the timestamp to render.
@@ -71,7 +72,7 @@ class Worker {
 		const container = new MP4.Parser(await init.promise)
 
 		const timeline = msg.kind === "audio" ? this.#timeline.audio : this.#timeline.video
-		const reader = new SubgroupReader(msg.header, new Reader(msg.buffer, msg.stream))
+		const reader = new SubgroupReader(msg.header, new ReadableStreamBuffer(msg.stream, msg.buffer))
 
 		// Create a queue that will contain each MP4 frame.
 		const queue = new TransformStream<MP4.Frame>({})
@@ -80,23 +81,23 @@ class Worker {
 		// Add the segment to the timeline
 		const segments = timeline.segments.getWriter()
 		await segments.write({
-			sequence: msg.header.group,
+			sequence: msg.header.group_id,
 			frames: queue.readable,
 		})
 		segments.releaseLock()
 
 		// Read each chunk, decoding the MP4 frames and adding them to the queue.
-		for (;;) {
+		for (; ;) {
 			const chunk = await reader.read()
 			if (!chunk) {
 				break
 			}
 
-			if (!(chunk.payload instanceof Uint8Array)) {
-				throw new Error(`invalid payload: ${chunk.payload}`)
+			if (!(chunk.object_payload instanceof Uint8Array)) {
+				throw new Error(`invalid payload: ${chunk.object_payload}`)
 			}
 
-			const frames = container.decode(chunk.payload)
+			const frames = container.decode(chunk.object_payload)
 			for (const frame of frames) {
 				await segment.write(frame)
 			}

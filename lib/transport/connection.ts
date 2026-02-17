@@ -1,6 +1,7 @@
 import * as Control from "./control"
 import { Objects } from "./objects"
 import { asError } from "../common/error"
+import { ControlStream } from "./stream"
 
 import { Publisher } from "./publisher"
 import { Subscriber } from "./subscriber"
@@ -10,7 +11,7 @@ export class Connection {
 	#quic: WebTransport
 
 	// Use to receive/send control messages.
-	#control: Control.Stream
+	#controlStream: ControlStream
 
 	// Use to receive/send objects.
 	#objects: Objects
@@ -24,13 +25,13 @@ export class Connection {
 	// Async work running in the background
 	#running: Promise<void>
 
-	constructor(quic: WebTransport, control: Control.Stream, objects: Objects) {
+	constructor(quic: WebTransport, stream: ControlStream, objects: Objects) {
 		this.#quic = quic
-		this.#control = control
+		this.#controlStream = stream
 		this.#objects = objects
 
-		this.#publisher = new Publisher(this.#control, this.#objects)
-		this.#subscriber = new Subscriber(this.#control, this.#objects)
+		this.#publisher = new Publisher(this.#controlStream, this.#objects)
+		this.#subscriber = new Subscriber(this.#controlStream, this.#objects)
 
 		this.#running = this.#run()
 	}
@@ -43,12 +44,12 @@ export class Connection {
 		await Promise.all([this.#runControl(), this.#runObjects()])
 	}
 
-	announce(namespace: string[]) {
-		return this.#publisher.announce(namespace)
+	publish_namespace(namespace: string[]) {
+		return this.#publisher.publish_namespace(namespace)
 	}
 
-	announced() {
-		return this.#subscriber.announced()
+	publishedNamespaces() {
+		return this.#subscriber.publishedNamespaces()
 	}
 
 	subscribe(namespace: string[], track: string) {
@@ -65,23 +66,36 @@ export class Connection {
 
 	async #runControl() {
 		// Receive messages until the connection is closed.
-		for (;;) {
-			const msg = await this.#control.recv()
-			await this.#recv(msg)
+		try {
+			console.log("starting control loop")
+			for (; ;) {
+				const msg = await this.#controlStream.recv()
+				await this.#recv(msg)
+			}
+		} catch (e) {
+			console.error("Error in control stream:", e)
+			throw e
 		}
 	}
 
 	async #runObjects() {
-		for (;;) {
-			const obj = await this.#objects.recv()
-			if (!obj) break
+		try {
+			console.log("starting object loop")
+			for (; ;) {
+				const obj = await this.#objects.recv()
+				console.log("object loop got obj", obj)
+				if (!obj) break
 
-			await this.#subscriber.recvObject(obj)
+				await this.#subscriber.recvObject(obj)
+			}
+		} catch (e) {
+			console.error("Error in object stream:", e)
+			throw e
 		}
 	}
 
-	async #recv(msg: Control.Message) {
-		if (Control.isPublisher(msg)) {
+	async #recv(msg: Control.MessageWithType) {
+		if (Control.isPublisher(msg.type)) {
 			await this.#subscriber.recv(msg)
 		} else {
 			await this.#publisher.recv(msg)

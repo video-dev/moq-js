@@ -1,320 +1,285 @@
-const MAX_U6 = Math.pow(2, 6) - 1
-const MAX_U14 = Math.pow(2, 14) - 1
-const MAX_U30 = Math.pow(2, 30) - 1
-const MAX_U31 = Math.pow(2, 31) - 1
-const MAX_U53 = Number.MAX_SAFE_INTEGER
-const MAX_U62: bigint = 2n ** 62n - 1n
 
-// Reader wraps a stream and provides convience methods for reading pieces from a stream
-// Unfortunately we can't use a BYOB reader because it's not supported with WebTransport+WebWorkers yet.
-export class Reader {
-	#buffer: Uint8Array
-	#stream: ReadableStream<Uint8Array>
-	#reader: ReadableStreamDefaultReader<Uint8Array>
+import {
+	ControlMessageType, FetchError,
+	MessageWithType, Publish,
+	PublishDone, PublishError, PublishNamespace,
+	PublishNamespaceDone, PublishNamespaceError,
+	PublishNamespaceOk, PublishOk, Unsubscribe,
+	Fetch, FetchOk, FetchCancel,
+	Subscribe, SubscribeOk, SubscribeError,
+	SubscribeUpdate, SubscribeNamespace,
+	SubscribeNamespaceOk, SubscribeNamespaceError,
+} from "./control"
+import { debug } from "./utils"
+import { ImmutableBytesBuffer, ReadableWritableStreamBuffer, Reader, Writer } from "./buffer"
 
-	constructor(buffer: Uint8Array, stream: ReadableStream<Uint8Array>) {
-		this.#buffer = buffer
-		this.#stream = stream
-		this.#reader = this.#stream.getReader()
+export class ControlStream {
+	private decoder: Decoder
+	private encoder: Encoder
+	#nextRequestId = 0n
+
+	#mutex = Promise.resolve()
+
+	constructor(c: ReadableWritableStreamBuffer) {
+		this.decoder = new Decoder(c)
+		this.encoder = new Encoder(c)
 	}
 
-	getByteLength(): number {
-		return this.#buffer.byteLength
+	// Will error if two messages are read at once.
+	async recv(): Promise<MessageWithType> {
+		const msg = await this.decoder.message()
+		return msg
 	}
 
-	// Adds more data to the buffer, returning true if more data was added.
-	async #fill(): Promise<boolean> {
-		const result = await this.#reader.read()
-		if (result.done) {
-			return false
-		}
-
-		const buffer = new Uint8Array(result.value)
-
-		if (this.#buffer.byteLength == 0) {
-			this.#buffer = buffer
-		} else {
-			const temp = new Uint8Array(this.#buffer.byteLength + buffer.byteLength)
-			temp.set(this.#buffer)
-			temp.set(buffer, this.#buffer.byteLength)
-			this.#buffer = temp
-		}
-
-		return true
-	}
-
-	// Add more data to the buffer until it's at least size bytes.
-	async #fillTo(size: number) {
-		while (this.#buffer.byteLength < size) {
-			if (!(await this.#fill())) {
-				throw new Error("unexpected end of stream")
-			}
+	async send(msg: MessageWithType) {
+		const unlock = await this.#lock()
+		try {
+			debug("sending message", msg)
+			const payload = this.encoder.message(msg)
+			debug("sending payload", payload)
+			await this.encoder.send(payload)
+		} finally {
+			unlock()
 		}
 	}
 
-	// Consumes the first size bytes of the buffer.
-	#slice(size: number): Uint8Array {
-		const result = new Uint8Array(this.#buffer.buffer, this.#buffer.byteOffset, size)
-		this.#buffer = new Uint8Array(this.#buffer.buffer, this.#buffer.byteOffset + size)
+	async #lock() {
+		// Make a new promise that we can resolve later.
+		let done: () => void
+		const p = new Promise<void>((resolve) => {
+			done = () => resolve()
+		})
 
-		return result
+		// Wait until the previous lock is done, then resolve our lock.
+		const lock = this.#mutex.then(() => done)
+
+		// Save our lock as the next lock.
+		this.#mutex = p
+
+		// Return the lock.
+		return lock
 	}
 
-	async read(size: number): Promise<Uint8Array> {
-		if (size == 0) return new Uint8Array()
-
-		await this.#fillTo(size)
-		return this.#slice(size)
-	}
-
-	async readAll(): Promise<Uint8Array> {
-		// eslint-disable-next-line no-empty
-		while (await this.#fill()) {}
-		return this.#slice(this.#buffer.byteLength)
-	}
-
-	async tuple(): Promise<string[]> {
-		const length = await this.u53()
-		const tuple = (await this.string()).split("/").filter(Boolean) // remove empty strings
-
-		if (length !== tuple.length) {
-			throw new Error(`expected tuple length ${length}, got ${tuple.length}`)
-		}
-
-		return tuple
-	}
-
-	async string(maxLength?: number): Promise<string> {
-		const length = await this.u53()
-		if (maxLength !== undefined && length > maxLength) {
-			throw new Error(`string length ${length} exceeds max length ${maxLength}`)
-		}
-
-		const buffer = await this.read(length)
-		return new TextDecoder().decode(buffer)
-	}
-
-	async u8(): Promise<number> {
-		await this.#fillTo(1)
-		return this.#slice(1)[0]
-	}
-
-	// Returns a Number using 53-bits, the max Javascript can use for integer math
-	async u53(): Promise<number> {
-		const v = await this.u62()
-		if (v > MAX_U53) {
-			throw new Error("value larger than 53-bits; use v62 instead")
-		}
-
-		return Number(v)
-	}
-
-	// NOTE: Returns a bigint instead of a number since it may be larger than 53-bits
-	async u62(): Promise<bigint> {
-		await this.#fillTo(1)
-		const size = (this.#buffer[0] & 0xc0) >> 6
-
-		if (size == 0) {
-			const first = this.#slice(1)[0]
-			return BigInt(first) & 0x3fn
-		} else if (size == 1) {
-			await this.#fillTo(2)
-			const slice = this.#slice(2)
-			const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
-
-			return BigInt(view.getInt16(0)) & 0x3fffn
-		} else if (size == 2) {
-			await this.#fillTo(4)
-			const slice = this.#slice(4)
-			const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
-
-			return BigInt(view.getUint32(0)) & 0x3fffffffn
-		} else if (size == 3) {
-			await this.#fillTo(8)
-			const slice = this.#slice(8)
-			const view = new DataView(slice.buffer, slice.byteOffset, slice.byteLength)
-
-			return view.getBigUint64(0) & 0x3fffffffffffffffn
-		} else {
-			throw new Error("impossible")
-		}
-	}
-
-	async done(): Promise<boolean> {
-		if (this.#buffer.byteLength > 0) return false
-		return !(await this.#fill())
-	}
-
-	async close() {
-		this.#reader.releaseLock()
-		await this.#stream.cancel()
-	}
-
-	release(): [Uint8Array, ReadableStream<Uint8Array>] {
-		this.#reader.releaseLock()
-		return [this.#buffer, this.#stream]
+	nextRequestId(incr: bigint = 2n): bigint {
+		const id = this.#nextRequestId
+		this.#nextRequestId += incr
+		return id
 	}
 }
 
-// Writer wraps a stream and writes chunks of data
-export class Writer {
-	#scratch: Uint8Array
-	#writer: WritableStreamDefaultWriter<Uint8Array>
-	#stream: WritableStream<Uint8Array>
+export class Decoder {
+	r: Reader
 
-	constructor(stream: WritableStream<Uint8Array>) {
-		this.#stream = stream
-		this.#scratch = new Uint8Array(8)
-		this.#writer = this.#stream.getWriter()
+	constructor(r: Reader) {
+		this.r = r
 	}
 
-	async u8(v: number) {
-		await this.write(this.setUint8(this.#scratch, v))
+	private async messageType(): Promise<ControlMessageType> {
+		const t = await this.r.getNumberVarInt()
+		return t as ControlMessageType
 	}
 
-	async i32(v: number) {
-		if (Math.abs(v) > MAX_U31) {
-			throw new Error(`overflow, value larger than 32-bits: ${v}`)
+	async message(): Promise<MessageWithType> {
+		const t = await this.messageType()
+		const advertisedLength = await this.r.getU16()
+		if (advertisedLength > this.r.byteLength) {
+			console.error(
+				`message: ${ControlMessageType.toString(t)} length mismatch: advertised ${advertisedLength} > ${this.r.byteLength} received`,
+			)
+			// NOTE(itzmanish): should we have a timeout and retry few times even if timeout is reached?
+			await this.r.waitForBytes(advertisedLength)
+		}
+		const rawPayload = await this.r.read(advertisedLength)
+		const payload = new ImmutableBytesBuffer(rawPayload)
+
+		let res: MessageWithType
+		switch (t) {
+			case ControlMessageType.Subscribe:
+				res = {
+					type: t,
+					message: Subscribe.deserialize(payload),
+				}
+				break
+			case ControlMessageType.SubscribeOk:
+				res = {
+					type: t,
+					message: SubscribeOk.deserialize(payload),
+				}
+				break
+			case ControlMessageType.SubscribeError:
+				res = {
+					type: t,
+					message: SubscribeError.deserialize(payload),
+				}
+				break
+			case ControlMessageType.Unsubscribe:
+				res = {
+					type: t,
+					message: Unsubscribe.deserialize(payload),
+				}
+				break
+			case ControlMessageType.SubscribeUpdate:
+				res = {
+					type: t,
+					message: SubscribeUpdate.deserialize(payload),
+				}
+				break
+			case ControlMessageType.Publish:
+				res = {
+					type: t,
+					message: Publish.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishDone:
+				res = {
+					type: t,
+					message: PublishDone.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishOk:
+				res = {
+					type: t,
+					message: PublishOk.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishError:
+				res = {
+					type: t,
+					message: PublishError.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishNamespace:
+				res = {
+					type: t,
+					message: PublishNamespace.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishNamespaceOk:
+				res = {
+					type: t,
+					message: PublishNamespaceOk.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishNamespaceDone:
+				res = {
+					type: t,
+					message: PublishNamespaceDone.deserialize(payload),
+				}
+				break
+			case ControlMessageType.PublishNamespaceError:
+				res = {
+					type: t,
+					message: PublishNamespaceError.deserialize(payload),
+				}
+				break
+			case ControlMessageType.Fetch:
+				res = {
+					type: t,
+					message: Fetch.deserialize(payload),
+				}
+				break
+			case ControlMessageType.FetchCancel:
+				res = {
+					type: t,
+					message: FetchCancel.deserialize(payload),
+				}
+				break
+			case ControlMessageType.FetchOk:
+				res = {
+					type: t,
+					message: FetchOk.deserialize(payload),
+				}
+				break
+			case ControlMessageType.FetchError:
+				res = {
+					type: t,
+					message: FetchError.deserialize(payload),
+				}
+				break
+			case ControlMessageType.SubscribeNamespace:
+				res = {
+					type: t,
+					message: SubscribeNamespace.deserialize(payload),
+				}
+				break
+			case ControlMessageType.SubscribeNamespaceOk:
+				res = {
+					type: t,
+					message: SubscribeNamespaceOk.deserialize(payload),
+				}
+				break
+			case ControlMessageType.SubscribeNamespaceError:
+				res = {
+					type: t,
+					message: SubscribeNamespaceError.deserialize(payload),
+				}
+				break
+			default:
+				throw new Error(`unknown message kind: ${t}`)
 		}
 
-		// We don't use a VarInt, so it always takes 4 bytes.
-		// This could be improved but nothing is standardized yet.
-		await this.write(this.setInt32(this.#scratch, v))
-	}
+		return res
 
-	async u53(v: number) {
-		if (v < 0) {
-			throw new Error(`underflow, value is negative: ${v}`)
-		} else if (v > MAX_U53) {
-			throw new Error(`overflow, value larger than 53-bits: ${v}`)
-		}
-
-		await this.write(this.setVint53(this.#scratch, v))
-	}
-
-	async u62(v: bigint) {
-		if (v < 0) {
-			throw new Error(`underflow, value is negative: ${v}`)
-		} else if (v >= MAX_U62) {
-			throw new Error(`overflow, value larger than 62-bits: ${v}`)
-		}
-
-		await this.write(this.setVint62(this.#scratch, v))
-	}
-
-	setUint8(dst: Uint8Array, v: number): Uint8Array {
-		dst[0] = v
-		return dst.slice(0, 1)
-	}
-
-	setUint16(dst: Uint8Array, v: number): Uint8Array {
-		const view = new DataView(dst.buffer, dst.byteOffset, 2)
-		view.setUint16(0, v)
-
-		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-	}
-
-	setInt32(dst: Uint8Array, v: number): Uint8Array {
-		const view = new DataView(dst.buffer, dst.byteOffset, 4)
-		view.setInt32(0, v)
-
-		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-	}
-
-	setUint32(dst: Uint8Array, v: number): Uint8Array {
-		const view = new DataView(dst.buffer, dst.byteOffset, 4)
-		view.setUint32(0, v)
-
-		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-	}
-
-	setVint53(dst: Uint8Array, v: number): Uint8Array {
-		if (v <= MAX_U6) {
-			return this.setUint8(dst, v)
-		} else if (v <= MAX_U14) {
-			return this.setUint16(dst, v | 0x4000)
-		} else if (v <= MAX_U30) {
-			return this.setUint32(dst, v | 0x80000000)
-		} else if (v <= MAX_U53) {
-			return this.setUint64(dst, BigInt(v) | 0xc000000000000000n)
-		} else {
-			throw new Error(`overflow, value larger than 53-bits: ${v}`)
-		}
-	}
-
-	setVint62(dst: Uint8Array, v: bigint): Uint8Array {
-		if (v < MAX_U6) {
-			return this.setUint8(dst, Number(v))
-		} else if (v < MAX_U14) {
-			return this.setUint16(dst, Number(v) | 0x4000)
-		} else if (v <= MAX_U30) {
-			return this.setUint32(dst, Number(v) | 0x80000000)
-		} else if (v <= MAX_U62) {
-			return this.setUint64(dst, BigInt(v) | 0xc000000000000000n)
-		} else {
-			throw new Error(`overflow, value larger than 62-bits: ${v}`)
-		}
-	}
-
-	setUint64(dst: Uint8Array, v: bigint): Uint8Array {
-		const view = new DataView(dst.buffer, dst.byteOffset, 8)
-		view.setBigUint64(0, v)
-
-		return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-	}
-
-	concatBuffer(bufferArray: (Uint8Array | undefined)[]) {
-		let length = 0
-		bufferArray.forEach((buffer) => {
-			if (buffer === undefined) return
-			length += buffer.length
-		})
-		let offset = 0
-		const result = new Uint8Array(length)
-		bufferArray.forEach((buffer) => {
-			if (buffer === undefined) return
-			result.set(buffer, offset)
-			offset += buffer.length
-		})
-		return result
-	}
-
-	encodeTuple(buffer: Uint8Array, tuple: string[]) {
-		const tupleBytes = new TextEncoder().encode(tuple.join("/"))
-
-		return this.concatBuffer([
-			this.setVint53(buffer, tuple.length),
-			this.setVint53(buffer, tupleBytes.length),
-			tupleBytes,
-		])
-	}
-
-	encodeString(buffer: Uint8Array, str: string): Uint8Array {
-		const strBytes = new TextEncoder().encode(str)
-
-		return this.concatBuffer([this.setVint53(buffer, strBytes.length), strBytes])
-	}
-
-	async write(v: Uint8Array) {
-		await this.#writer.write(v)
-	}
-	async tuple(arr: string[]) {
-		await this.u53(arr.length)
-		await this.string(arr.join("/"))
-	}
-	async string(str: string) {
-		const data = new TextEncoder().encode(str)
-		await this.u53(data.byteLength)
-		await this.write(data)
-	}
-
-	async close() {
-		this.#writer.releaseLock()
-		await this.#stream.close()
-	}
-
-	release(): WritableStream<Uint8Array> {
-		this.#writer.releaseLock()
-		return this.#stream
 	}
 }
+
+export class Encoder {
+	w: Writer
+
+	constructor(w: Writer) {
+		this.w = w
+	}
+
+	message(m: MessageWithType): Uint8Array {
+		const { message } = m
+		switch (m.type) {
+			case ControlMessageType.Subscribe:
+				return Subscribe.serialize(message as Subscribe)
+			case ControlMessageType.SubscribeOk:
+				return SubscribeOk.serialize(message as SubscribeOk)
+			case ControlMessageType.SubscribeError:
+				return SubscribeError.serialize(message as SubscribeError)
+			case ControlMessageType.SubscribeUpdate:
+				return SubscribeUpdate.serialize(message as SubscribeUpdate)
+			case ControlMessageType.SubscribeNamespace:
+				return SubscribeNamespace.serialize(message as SubscribeNamespace)
+			case ControlMessageType.SubscribeNamespaceOk:
+				return SubscribeNamespaceOk.serialize(message as SubscribeNamespaceOk)
+			case ControlMessageType.SubscribeNamespaceError:
+				return SubscribeNamespaceError.serialize(message as SubscribeNamespaceError)
+			case ControlMessageType.Unsubscribe:
+				return Unsubscribe.serialize(message as Unsubscribe)
+			case ControlMessageType.Publish:
+				return Publish.serialize(message as Publish)
+			case ControlMessageType.PublishDone:
+				return PublishDone.serialize(message as PublishDone)
+			case ControlMessageType.PublishOk:
+				return PublishOk.serialize(message as PublishOk)
+			case ControlMessageType.PublishError:
+				return PublishError.serialize(message as PublishError)
+			case ControlMessageType.PublishNamespace:
+				return PublishNamespace.serialize(message as PublishNamespace)
+			case ControlMessageType.PublishNamespaceOk:
+				return PublishNamespaceOk.serialize(message as PublishNamespaceOk)
+			case ControlMessageType.PublishNamespaceError:
+				return PublishNamespaceError.serialize(message as PublishNamespaceError)
+			case ControlMessageType.PublishNamespaceDone:
+				return PublishNamespaceDone.serialize(message as PublishNamespaceDone)
+			case ControlMessageType.Fetch:
+				return Fetch.serialize(message as Fetch)
+			case ControlMessageType.FetchCancel:
+				return FetchCancel.serialize(message as FetchCancel)
+			case ControlMessageType.FetchOk:
+				return FetchOk.serialize(message as FetchOk)
+			case ControlMessageType.FetchError:
+				return FetchError.serialize(message as FetchError)
+			default:
+				throw new Error(`unknown message kind in encoder`)
+		}
+	}
+
+	async send(payload: Uint8Array) {
+		await this.w.write(payload)
+	}
+}
+

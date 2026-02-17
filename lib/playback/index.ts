@@ -7,7 +7,7 @@ import { asError } from "../common/error"
 import Backend from "./backend"
 
 import { Client } from "../transport/client"
-import { SubgroupReader } from "../transport/objects"
+import { SubgroupReader } from "../transport/subgroup"
 
 export type Range = Message.Range
 export type Timeline = Message.Timeline
@@ -49,8 +49,8 @@ export default class Player extends EventTarget {
 		this.#catalog = catalog
 		this.#tracksByName = new Map(catalog.tracks.map((track) => [track.name, track]))
 		this.#tracknum = tracknum
-		this.#audioTrackName = ""
-		this.#videoTrackName = ""
+		this.#audioTrackName = catalog.tracks.find((track) => Catalog.isAudioTrack(track))?.name ?? ""
+		this.#videoTrackName = catalog.tracks.find((track) => Catalog.isVideoTrack(track))?.name ?? ""
 		this.#muted = false
 		this.#paused = false
 		this.#backend = new Backend({ canvas, catalog }, this)
@@ -73,7 +73,7 @@ export default class Player extends EventTarget {
 	}
 
 	static async create(config: PlayerConfig, tracknum: number): Promise<Player> {
-		const client = new Client({ url: config.url, fingerprint: config.fingerprint, role: "subscriber" })
+		const client = new Client({ url: config.url, fingerprint: config.fingerprint })
 		const connection = await client.connect()
 
 		const catalog = await Catalog.fetch(connection, [config.namespace])
@@ -81,7 +81,7 @@ export default class Player extends EventTarget {
 
 		const canvas = config.canvas.transferControlToOffscreen()
 
-		return new Player(connection, catalog, tracknum, canvas)
+		return new Player(connection, catalog as any, tracknum, canvas)
 	}
 
 	async #run() {
@@ -90,13 +90,16 @@ export default class Player extends EventTarget {
 		const inits = new Set<[string, string]>()
 		const tracks = new Array<Catalog.Track>()
 
-		this.#catalog.tracks.forEach((track, index) => {
-			if (index == this.#tracknum || Catalog.isAudioTrack(track)) {
+		this.#catalog.tracks.forEach((track) => {
+			if (track.name === this.#videoTrackName || track.name === this.#audioTrackName) {
 				if (!track.namespace) throw new Error("track has no namespace")
 				if (track.initTrack) inits.add([track.namespace.join("/"), track.initTrack])
 				tracks.push(track)
 			}
 		})
+
+		console.log("inits", inits)
+		console.log("tracks", tracks)
 
 		// Call #runInit on each unique init track
 		// TODO do this in parallel with #runTrack to remove a round trip
@@ -110,17 +113,20 @@ export default class Player extends EventTarget {
 	}
 
 	async #runInit(namespace: string, name: string) {
+		console.log("running #runInit", namespace, name)
 		const sub = await this.#connection.subscribe([namespace], name)
 		try {
+			console.log("waiting for init data")
 			const init = await Promise.race([sub.data(), this.#running])
 			if (!init) throw new Error("no init data")
 
+			console.log("got init data")
 			// We don't care what type of reader we get, we just want the payload.
 			const chunk = await init.read()
 			if (!chunk) throw new Error("no init chunk")
-			if (!(chunk.payload instanceof Uint8Array)) throw new Error("invalid init chunk")
+			if (!(chunk.object_payload instanceof Uint8Array)) throw new Error("invalid init chunk")
 
-			this.#backend.init({ data: chunk.payload, name })
+			this.#backend.init({ data: chunk.object_payload, name })
 		} finally {
 			await sub.close()
 		}
@@ -147,7 +153,9 @@ export default class Player extends EventTarget {
 		const sub = await this.#connection.subscribe(track.namespace, track.name)
 
 		try {
-			for (;;) {
+			console.log("starting segment data loop")
+			for (; ;) {
+				console.log("waiting for segment data")
 				const segment = await Promise.race([sub.data(), this.#running])
 				if (!segment) continue
 
@@ -168,7 +176,7 @@ export default class Player extends EventTarget {
 					eventOfFirstSegmentSent = true
 				}
 
-				const [buffer, stream] = segment.stream.release()
+				const [buffer, stream] = segment.stream.release() as [Uint8Array, ReadableStream<Uint8Array>]
 
 				this.#backend.segment({
 					init: track.initTrack,

@@ -1,87 +1,123 @@
 import * as Control from "./control"
 import { Queue, Watch } from "../common/async"
 import { Objects } from "./objects"
-import type { TrackReader, SubgroupReader } from "./objects"
+import type { TrackReader } from "./objects"
+import { debug } from "./utils"
+import { ControlStream } from "./stream"
+import { SubgroupReader } from "./subgroup"
+
+export interface TrackInfo {
+	track_alias: bigint
+	track: TrackReader | SubgroupReader
+}
 
 export class Subscriber {
 	// Use to send control messages.
-	#control: Control.Stream
+	#control: ControlStream
 
 	// Use to send objects.
 	#objects: Objects
 
 	// Announced broadcasts.
-	#announce = new Map<string, AnnounceRecv>()
-	#announceQueue = new Watch<AnnounceRecv[]>([])
+	#publishedNamespaces = new Map<string, PublishNamespaceRecv>()
+	#publishedNamespacesQueue = new Watch<PublishNamespaceRecv[]>([])
 
 	// Our subscribed tracks.
 	#subscribe = new Map<bigint, SubscribeSend>()
-	#subscribeNext = 0n
-
 	#trackToIDMap = new Map<string, bigint>()
+	#trackAliasMap = new Map<bigint, bigint>() // Maps request ID to track alias
+	#aliasToSubscriptionMap = new Map<bigint, bigint>() // Maps track alias to subscription ID
+	#pendingTrack = new Map<bigint, (id: bigint) => Promise<void>>()
 
-	constructor(control: Control.Stream, objects: Objects) {
+	constructor(control: ControlStream, objects: Objects) {
 		this.#control = control
 		this.#objects = objects
 	}
 
-	announced(): Watch<AnnounceRecv[]> {
-		return this.#announceQueue
+	publishedNamespaces(): Watch<PublishNamespaceRecv[]> {
+		return this.#publishedNamespacesQueue
 	}
 
-	async recv(msg: Control.Publisher) {
-		if (msg.kind == Control.Msg.Announce) {
-			await this.recvAnnounce(msg)
-		} else if (msg.kind == Control.Msg.Unannounce) {
-			this.recvUnannounce(msg)
-		} else if (msg.kind == Control.Msg.SubscribeOk) {
-			this.recvSubscribeOk(msg)
-		} else if (msg.kind == Control.Msg.SubscribeError) {
-			await this.recvSubscribeError(msg)
-		} else if (msg.kind == Control.Msg.SubscribeDone) {
-			await this.recvSubscribeDone(msg)
-		} else {
-			throw new Error(`unknown control message`) // impossible
+	async recv(msg: Control.MessageWithType) {
+		const { type, message } = msg;
+		switch (type) {
+			case Control.ControlMessageType.PublishNamespace:
+				await this.recvPublishNamespace(message)
+				break
+			case Control.ControlMessageType.PublishNamespaceDone:
+				this.recvPublishNamespaceDone(message)
+				break
+			case Control.ControlMessageType.SubscribeOk:
+				this.recvSubscribeOk(message)
+				break
+			case Control.ControlMessageType.SubscribeError:
+				await this.recvSubscribeError(message)
+				break
+			case Control.ControlMessageType.PublishDone:
+				await this.recvPublishDone(message)
+				break
+			default:
+				throw new Error(`unknown control message`) // impossible
 		}
 	}
 
-	async recvAnnounce(msg: Control.Announce) {
-		if (this.#announce.has(msg.namespace.join("/"))) {
-			throw new Error(`duplicate announce for namespace: ${msg.namespace.join("/")}`)
+	async recvPublishNamespace(msg: Control.PublishNamespace) {
+		if (this.#publishedNamespaces.has(msg.namespace.join("/"))) {
+			throw new Error(`duplicate publish namespace for namespace: ${msg.namespace.join("/")}`)
 		}
 
-		await this.#control.send({ kind: Control.Msg.AnnounceOk, namespace: msg.namespace })
+		await this.#control.send({
+			type: Control.ControlMessageType.PublishNamespaceOk,
+			message: { id: msg.id }
+		})
 
-		const announce = new AnnounceRecv(this.#control, msg.namespace)
-		this.#announce.set(msg.namespace.join("/"), announce)
+		const publishNamespace = new PublishNamespaceRecv(this.#control, msg.namespace, msg.id)
+		this.#publishedNamespaces.set(msg.namespace.join("/"), publishNamespace)
 
-		this.#announceQueue.update((queue) => [...queue, announce])
+		this.#publishedNamespacesQueue.update((queue) => [...queue, publishNamespace])
 	}
 
-	recvUnannounce(_msg: Control.Unannounce) {
-		throw new Error(`TODO Unannounce`)
+	recvPublishNamespaceDone(_msg: Control.PublishNamespaceDone) {
+		throw new Error(`TODO PublishNamespaceDone`)
+	}
+
+	async subscribe_namespace(namespace: string[]) {
+		const id = this.#control.nextRequestId()
+		// TODO(itzmanish): implement this
+		const msg: Control.MessageWithType = {
+			type: Control.ControlMessageType.SubscribeNamespace,
+			message: {
+				id,
+				namespace,
+			}
+		}
+		await this.#control.send(msg)
 	}
 
 	async subscribe(namespace: string[], track: string) {
-		const id = this.#subscribeNext++
+		const id = this.#control.nextRequestId()
 
 		const subscribe = new SubscribeSend(this.#control, id, namespace, track)
 		this.#subscribe.set(id, subscribe)
 
 		this.#trackToIDMap.set(track, id)
 
-		await this.#control.send({
-			kind: Control.Msg.Subscribe,
-			id,
-			trackId: id,
-			namespace,
-			name: track,
-			subscriber_priority: 127, // default to mid value, see: https://github.com/moq-wg/moq-transport/issues/504
-			group_order: Control.GroupOrder.Publisher,
-			location: {
-				mode: "latest_group",
-			},
-		})
+		const subscription_req: Control.MessageWithType = {
+			type: Control.ControlMessageType.Subscribe,
+			message: {
+				id,
+				namespace,
+				name: track,
+				subscriber_priority: 127, // default to mid value, see: https://github.com/moq-wg/moq-transport/issues/504
+				group_order: Control.GroupOrder.Publisher,
+				filter_type: Control.FilterType.NextGroupStart,
+				forward: 1, // always forward
+				params: new Map(),
+			}
+		}
+
+		await this.#control.send(subscription_req)
+		debug("subscribe sent", subscription_req)
 
 		return subscribe
 	}
@@ -94,7 +130,7 @@ export class Subscriber {
 				return
 			}
 			try {
-				await this.#control.send({ kind: Control.Msg.Unsubscribe, id: trackID })
+				await this.#control.send({ type: Control.ControlMessageType.Unsubscribe, message: { id: trackID } })
 				this.#trackToIDMap.delete(track)
 			} catch (error) {
 				console.error(`Failed to unsubscribe from track ${track}:`, error)
@@ -110,7 +146,18 @@ export class Subscriber {
 			throw new Error(`subscribe ok for unknown id: ${msg.id}`)
 		}
 
-		subscribe.onOk()
+		// Store the track alias provided by the publisher
+		this.#trackAliasMap.set(msg.id, msg.track_alias)
+		// Also create reverse mapping for receiving objects
+		this.#aliasToSubscriptionMap.set(msg.track_alias, msg.id)
+		const callback = this.#pendingTrack.get(msg.track_alias)
+		if (callback) {
+			this.#pendingTrack.delete(msg.track_alias)
+			callback(msg.id)
+		}
+
+		console.log("subscribe ok", msg)
+		subscribe.onOk(msg.track_alias)
 	}
 
 	async recvSubscribeError(msg: Control.SubscribeError) {
@@ -122,58 +169,83 @@ export class Subscriber {
 		await subscribe.onError(msg.code, msg.reason)
 	}
 
-	async recvSubscribeDone(msg: Control.SubscribeDone) {
+	async recvPublishDone(msg: Control.PublishDone) {
 		const subscribe = this.#subscribe.get(msg.id)
 		if (!subscribe) {
-			throw new Error(`subscribe error for unknown id: ${msg.id}`)
+			throw new Error(`publish done for unknown id: ${msg.id}`)
 		}
 
-		await subscribe.onError(msg.code, msg.reason)
+		await subscribe.onDone(msg.code, msg.stream_count, msg.reason)
 	}
 
 	async recvObject(reader: TrackReader | SubgroupReader) {
-		const subscribe = this.#subscribe.get(reader.header.track)
-		if (!subscribe) {
-			throw new Error(`data for for unknown track: ${reader.header.track}`)
+		console.log("got object on recvObject", reader)
+		// Get track alias from reader header
+		const track_alias = reader.header.track_alias
+
+		// Map track alias back to subscription ID
+		const subscriptionId = this.#aliasToSubscriptionMap.get(track_alias)
+		console.log("got subscriptionId", subscriptionId)
+		const callback = async (id: bigint) => {
+			const subscribe = this.#subscribe.get(id)
+			if (!subscribe) {
+				throw new Error(`data for unknown subscription: ${id}`)
+			}
+			console.log("doing subscribe on data", reader)
+			return subscribe.onData(reader)
+		}
+		if (subscriptionId === undefined) {
+			console.warn(`Exception track alias ${track_alias} not found in aliasToSubscriptionMap.`)
+			this.#pendingTrack.set(track_alias, callback)
+			return
 		}
 
-		await subscribe.onData(reader)
+		await callback(subscriptionId)
 	}
 }
 
-export class AnnounceRecv {
-	#control: Control.Stream
+export class PublishNamespaceRecv {
+	#control: ControlStream
+	#id: bigint
 
 	readonly namespace: string[]
 
-	// The current state of the announce
+	// The current state of the publish namespace
 	#state: "init" | "ack" | "closed" = "init"
 
-	constructor(control: Control.Stream, namespace: string[]) {
+	constructor(control: ControlStream, namespace: string[], id: bigint) {
 		this.#control = control // so we can send messages
 		this.namespace = namespace
+		this.#id = id
 	}
 
-	// Acknowledge the subscription as valid.
+	// Acknowledge the publish namespace as valid.
 	async ok() {
 		if (this.#state !== "init") return
 		this.#state = "ack"
 
 		// Send the control message.
-		return this.#control.send({ kind: Control.Msg.AnnounceOk, namespace: this.namespace })
+		return this.#control.send({
+			type: Control.ControlMessageType.PublishNamespaceOk,
+			message: { id: this.#id }
+		})
 	}
 
 	async close(code = 0n, reason = "") {
 		if (this.#state === "closed") return
 		this.#state = "closed"
 
-		return this.#control.send({ kind: Control.Msg.AnnounceError, namespace: this.namespace, code, reason })
+		return this.#control.send({
+			type: Control.ControlMessageType.PublishNamespaceError,
+			message: { id: this.#id, code, reason }
+		})
 	}
 }
 
 export class SubscribeSend {
-	#control: Control.Stream
+	#control: ControlStream
 	#id: bigint
+	#trackAlias?: bigint // Set when SUBSCRIBE_OK is received
 
 	readonly namespace: string[]
 	readonly track: string
@@ -181,11 +253,15 @@ export class SubscribeSend {
 	// A queue of received streams for this subscription.
 	#data = new Queue<TrackReader | SubgroupReader>()
 
-	constructor(control: Control.Stream, id: bigint, namespace: string[], track: string) {
+	constructor(control: ControlStream, id: bigint, namespace: string[], track: string) {
 		this.#control = control // so we can send messages
 		this.#id = id
 		this.namespace = namespace
 		this.track = track
+	}
+
+	get trackAlias(): bigint | undefined {
+		return this.#trackAlias
 	}
 
 	async close(_code = 0n, _reason = "") {
@@ -193,8 +269,14 @@ export class SubscribeSend {
 		// await this.#inner.sendReset(code, reason)
 	}
 
-	onOk() {
-		// noop
+	onOk(trackAlias: bigint) {
+		console.log("setting track alias", trackAlias)
+		this.#trackAlias = trackAlias
+	}
+
+	// FIXME(itzmanish): implement correctly 
+	async onDone(code: bigint, streamCount: bigint, reason: string) {
+		throw new Error(`TODO onDone`)
 	}
 
 	async onError(code: bigint, reason: string) {
@@ -211,6 +293,7 @@ export class SubscribeSend {
 	}
 
 	async onData(reader: TrackReader | SubgroupReader) {
+		console.log("subscribe send onData", reader)
 		if (!this.#data.closed()) await this.#data.push(reader)
 	}
 
