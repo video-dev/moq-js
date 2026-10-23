@@ -12,7 +12,8 @@
 			canvas: elem,
 			namespace: "bbb",
 		};
-		var player = null;
-		MoqSimplePlayer.create(config, 0).then((p) => {});
+		var player = MoqSimplePlayer.default.create(config, 0).then((p) => {
+			p.play();
+		});
 	</script>
 </body>
